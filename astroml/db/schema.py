@@ -221,6 +221,39 @@ class Asset(Base):
 
 
 # ---------------------------------------------------------------------------
+# Effects
+# ---------------------------------------------------------------------------
+
+class Effect(Base):
+    """One row per Stellar effect — captures state changes from operations.
+
+    Effects represent the outcomes of operations on accounts, such as balance
+    changes, signers, flags, and other state modifications. This table provides
+    a more granular view of account state changes than operations alone.
+    """
+
+    __tablename__ = "effects"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account: Mapped[str] = mapped_column(String(56), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    amount: Mapped[Optional[float]] = mapped_column(Numeric)
+    asset_code: Mapped[Optional[str]] = mapped_column(String(12))
+    asset_issuer: Mapped[Optional[str]] = mapped_column(String(56))
+    destination_account: Mapped[Optional[str]] = mapped_column(String(56))
+    created_at: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    details: Mapped[Optional[dict]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql")
+    )
+
+    __table_args__ = (
+        Index("ix_effects_account_created_at", "account", "created_at"),
+        Index("ix_effects_type_created_at", "type", "created_at"),
+        Index("ix_effects_destination_created_at", "destination_account", "created_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Normalized Transactions
 # ---------------------------------------------------------------------------
 

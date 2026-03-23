@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from astroml.db.schema import Ledger, Operation, Transaction
+from astroml.db.schema import Effect, Ledger, Operation, Transaction
 
 
 def _parse_datetime(iso_string: str) -> datetime:
@@ -77,6 +77,52 @@ def parse_operation(data: dict, application_order: int = 1) -> Operation:
         amount=float(amount) if amount is not None else None,
         asset_code=asset_code,
         asset_issuer=asset_issuer,
+        created_at=_parse_datetime(data["created_at"]),
+        details=details if details else None,
+    )
+
+
+def parse_effect(data: dict) -> Effect:
+    """Parse a Horizon effect JSON dict into an Effect ORM instance."""
+    effect_type = data.get("type", "")
+    
+    # Extract common fields
+    account = data.get("account")
+    
+    # Extract type-specific fields
+    amount = None
+    asset_code = None
+    asset_issuer = None
+    destination = None
+    
+    if effect_type in ["account_created", "account_credited", "account_debited"]:
+        amount = data.get("amount")
+        if amount:
+            asset_type = data.get("asset_type")
+            if asset_type == "native":
+                asset_code = "XLM"
+                asset_issuer = None
+            else:
+                asset_code = data.get("asset_code")
+                asset_issuer = data.get("asset_issuer")
+    
+    if effect_type == "account_credited":
+        destination = account
+    
+    # Store all non-common fields in details
+    common_keys = {
+        "id", "paging_token", "account", "type", "created_at", "_links"
+    }
+    details = {k: v for k, v in data.items() if k not in common_keys}
+    
+    return Effect(
+        id=int(data["id"]),
+        account=account,
+        type=effect_type,
+        amount=float(amount) if amount is not None else None,
+        asset_code=asset_code,
+        asset_issuer=asset_issuer,
+        destination_account=destination,
         created_at=_parse_datetime(data["created_at"]),
         details=details if details else None,
     )

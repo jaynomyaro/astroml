@@ -5,9 +5,6 @@ robustness of CalibrationAnalyzer.
 """
 from __future__ import annotations
 
-import matplotlib
-matplotlib.use("Agg")  # non-interactive backend required before pyplot import
-
 import numpy as np
 import pytest
 from unittest.mock import patch

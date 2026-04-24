@@ -4,6 +4,7 @@ torch-geometric>=2.3.0
 
 numpy>=1.24
 pandas>=2.0
+polars>=1.0
 sqlalchemy>=2.0
 alembic>=1.12
 psycopg2-binary>=2.9

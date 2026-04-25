@@ -10,3 +10,7 @@ venv/
 # Rust build outputs
 target/
 target_local/
+.agents/
+.claude/
+skills-lock.json
+issue.md

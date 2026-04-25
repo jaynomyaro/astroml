@@ -1,0 +1,129 @@
+name: Security Audit
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  schedule:
+    # Run weekly on Monday at 06:00 UTC to catch newly published CVEs.
+    - cron: "0 6 * * 1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python security tests (pytest)
+  # ---------------------------------------------------------------------------
+  python-security:
+    name: Python Security Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -e .
+
+      - name: Run security test suite
+        run: |
+          pytest tests/test_security.py -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Python dependency vulnerability scan (pip-audit)
+  # ---------------------------------------------------------------------------
+  pip-audit:
+    name: Python Dependency Audit (pip-audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit requirements.txt
+        run: |
+          pip-audit -r requirements.txt --desc on --format columns
+        continue-on-error: false
+
+      - name: Audit requirements-minimal.txt (if present)
+        run: |
+          if [ -f requirements-minimal.txt ]; then
+            pip-audit -r requirements-minimal.txt --desc on --format columns
+          fi
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Secret scanning — detect hard-coded credentials in source
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history required by some scanners
+
+      - name: Scan for hard-coded secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Rust / Soroban contract security tests
+  # ---------------------------------------------------------------------------
+  rust-security:
+    name: Rust Contract Security Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust build artefacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run security tests
+        run: |
+          cargo test security -- --nocapture
+
+      - name: Run full test suite
+        run: |
+          cargo test -- --nocapture
+
+  # ---------------------------------------------------------------------------
+  # Rust dependency vulnerability scan (cargo-audit)
+  # ---------------------------------------------------------------------------
+  cargo-audit:
+    name: Rust Dependency Audit (cargo-audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Cargo.lock
+        run: cargo audit

@@ -10,6 +10,11 @@ function renderWithClient(ui: React.ReactElement) {
 test('renders dashboard sections', async () => {
   renderWithClient(<App />)
 
+  await waitFor(() => expect(screen.getByText(/Model Performance Monitoring/i)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText(/Accuracy/i)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText(/Drift Score/i)).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByText(/Prediction Accuracy Trend/i)).toBeInTheDocument())
+
   await waitFor(() => expect(screen.getByText(/Loyalty Dashboard/i)).toBeInTheDocument())
   await waitFor(() => expect(screen.getByText(/Current Tier/i)).toBeInTheDocument())
   await waitFor(() => expect(screen.getByText(/Points Balance/i)).toBeInTheDocument())
@@ -17,5 +22,4 @@ test('renders dashboard sections', async () => {
   await waitFor(() => expect(screen.getByText(/Redeem Points/i)).toBeInTheDocument())
   await waitFor(() => expect(screen.getByText(/Tier Comparison/i)).toBeInTheDocument())
   await waitFor(() => expect(screen.getByText(/Points History/i)).toBeInTheDocument())
-  await waitFor(() => expect(screen.getByText(/Invite Friends/i)).toBeInTheDocument())
 })

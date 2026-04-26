@@ -112,6 +112,25 @@ python -m astroml.graph.build_snapshot --window 30d
 
 ---
 
+
+## 🧪 Synthetic Fraud Pattern Injection
+
+Create benchmark datasets by injecting controlled fraud structures into a clean ledger copy:
+
+```bash
+python -m astroml.ingestion.synthetic_fraud_injector \
+  --input data/clean_ledger.jsonl \
+  --output data/ledger_with_fraud.jsonl \
+  --summary outputs/fraud_injection_summary.json \
+  --sybil-clusters 3 \
+  --sybil-cluster-size 8 \
+  --wash-loops 2 \
+  --wash-loop-size 5
+```
+
+The injector appends transactions tagged with `synthetic_fraud=true` and `fraud_pattern` (`sybil_cluster` or `wash_trading_loop`) for downstream benchmarking.
+
+---
 ## 🤖 Train Baseline GCN
 
 ```bash
@@ -122,6 +141,7 @@ python -m astroml.training.train_gcn
 
 ## 📊 Example Use Cases
 
+* [Liquidity Monitoring for the Stellar Community Fund](docs/scf-liquidity-monitoring.md)
 * Fraud / scam detection
 * Account clustering
 * Transaction risk scoring

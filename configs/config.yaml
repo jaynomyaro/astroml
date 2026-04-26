@@ -1,0 +1,30 @@
+# Default configuration for AstroML training experiments
+defaults:
+  - model: gcn
+  - training: default
+  - data: cora
+  - _self_
+
+# Experiment settings
+experiment:
+  name: "astroml_experiment"
+  seed: 42
+  device: "auto"  # auto, cpu, cuda
+  save_dir: "outputs"
+  log_level: "INFO"
+
+# MLflow tracking settings
+mlflow:
+  enabled: true
+  tracking_uri: "mlruns"   # local directory; set to a remote URI for a tracking server
+  experiment_name: "${experiment.name}"
+  run_name: null            # auto-generated when null
+  log_model_weights: true   # log model artifact at the end of training
+
+# Hydra settings
+hydra:
+  run:
+    dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: outputs/${experiment.name}/multirun
+    subdir: ${hydra.job.override_dirname}

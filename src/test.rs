@@ -1,8 +1,5 @@
-use soroban_sdk::{testutils::Accounts as _, Address, Bytes, Env, String};
-use soroban_sdk::contractclient::ContractClient;
-use fraud_registry::{Error, FraudRegistry, FraudReport, Validator};
-
-type FraudRegistryClient<'a> = ContractClient<'a, FraudRegistry>;
+use soroban_sdk::{testutils::Address as _, Address, Bytes, Env, String};
+use crate::{Error, FraudRegistry, FraudRegistryClient};
 
 #[test]
 fn test_contract_initialization() {
@@ -37,7 +34,7 @@ fn test_register_validator() {
     client.register_validator(&admin, &validator, &75);
     
     // Verify validator registration
-    let validator_info = client.get_validator(&validator).unwrap();
+    let validator_info = client.get_validator(&validator);
     assert_eq!(validator_info.address, validator);
     assert_eq!(validator_info.reputation, 75);
     assert_eq!(validator_info.report_count, 0);
@@ -86,7 +83,7 @@ fn test_report_fraud() {
         &fraudulent_account,
         &reason,
         &80,
-        Some(&evidence_hash),
+        &Some(evidence_hash.clone()),
     );
     
     // Verify fraud report
@@ -123,7 +120,7 @@ fn test_report_fraud_insufficient_reputation() {
         &fraudulent_account,
         &reason,
         &80,
-        None::<Bytes>,
+        &None::<Bytes>,
     );
     assert_eq!(result, Err(Ok(Error::InsufficientReputation)));
 }
@@ -150,7 +147,7 @@ fn test_report_fraud_insufficient_confidence() {
         &fraudulent_account,
         &reason,
         &40, // Below minimum confidence of 60
-        None::<Bytes>,
+        &None::<Bytes>,
     );
     assert_eq!(result, Err(Ok(Error::InsufficientConfidence)));
 }
@@ -172,10 +169,10 @@ fn test_duplicate_report() {
     
     // Report fraud first time
     let reason = String::from_str(&env, "Suspicious transaction patterns");
-    client.report_fraud(&validator, &fraudulent_account, &reason, &80, None::<Bytes>);
+    client.report_fraud(&validator, &fraudulent_account, &reason, &80, &None::<Bytes>);
     
     // Try to report fraud again (should fail)
-    let result = client.try_report_fraud(&validator, &fraudulent_account, &reason, &80, None::<Bytes>);
+    let result = client.try_report_fraud(&validator, &fraudulent_account, &reason, &80, &None::<Bytes>);
     assert_eq!(result, Err(Ok(Error::AlreadyReported)));
 }
 
@@ -200,13 +197,13 @@ fn test_consensus_threshold() {
     
     // Report fraud with 2 validators (below threshold of 3)
     let reason = String::from_str(&env, "Suspicious transaction patterns");
-    client.report_fraud(&validator1, &fraudulent_account, &reason, &80, None::<Bytes>);
-    client.report_fraud(&validator2, &fraudulent_account, &reason, &80, None::<Bytes>);
+    client.report_fraud(&validator1, &fraudulent_account, &reason, &80, &None::<Bytes>);
+    client.report_fraud(&validator2, &fraudulent_account, &reason, &80, &None::<Bytes>);
     
     assert!(!client.is_fraudulent(&fraudulent_account));
     
     // Report fraud with 3rd validator (meets threshold)
-    client.report_fraud(&validator3, &fraudulent_account, &reason, &80, None::<Bytes>);
+    client.report_fraud(&validator3, &fraudulent_account, &reason, &80, &None::<Bytes>);
     
     assert!(client.is_fraudulent(&fraudulent_account));
 }
@@ -222,7 +219,7 @@ fn test_update_config() {
     client.initialize(&admin);
     
     // Update configuration
-    client.update_config(&admin, Some(&60), Some(&70), Some(&5));
+    client.update_config(&admin, &Some(60_u32), &Some(70_u32), &Some(5_u32));
     
     // Verify updated configuration
     let (min_rep, min_conf, threshold) = client.get_config();
@@ -251,7 +248,7 @@ fn test_deactivate_validator() {
     
     // Try to report fraud with deactivated validator (should fail)
     let reason = String::from_str(&env, "Suspicious transaction patterns");
-    let result = client.try_report_fraud(&validator, &fraudulent_account, &reason, &80, None::<Bytes>);
+    let result = client.try_report_fraud(&validator, &fraudulent_account, &reason, &80, &None::<Bytes>);
     assert_eq!(result, Err(Ok(Error::ValidatorNotActive)));
 }
 

@@ -17,9 +17,7 @@ from stellar_sdk.exceptions import (
     BadRequestError,
     ConnectionError,
     NotFoundError,
-    RateLimitError,
-    RequestTimeoutError,
-    ServerError,
+    BaseHorizonError,
 )
 from tenacity import (
     retry,
@@ -32,6 +30,14 @@ from tenacity import (
 from astroml.db.session import get_session
 from astroml.db.schema import Effect, Operation
 from astroml.ingestion.parsers import parse_effect, parse_operation
+from astroml.ingestion.metrics import (
+    STREAM_RECORDS_PROCESSED,
+    STREAM_ERRORS,
+    STREAM_CONNECTION_HEALTH,
+    STREAM_RATE_LIMIT_BACKOFF,
+    STREAM_PROCESSING_LATENCY,
+    STREAM_CURSOR
+)
 
 logger = logging.getLogger("astroml.ingestion.enhanced_stream")
 
@@ -96,13 +102,13 @@ class RateLimitTracker:
 class ConnectionHealthMonitor:
     """Monitors connection health and detects drops."""
     
-    def __init__(self, check_interval: float = 30.0):
+    def __init__(self, check_interval: float = 30.0, max_consecutive_failures: int = 3):
         self.check_interval = check_interval
         self.last_successful_request: Optional[float] = None
         self.last_health_check: Optional[float] = None
         self.is_healthy: bool = True
         self.consecutive_failures: int = 0
-        self.max_consecutive_failures: int = 3
+        self.max_consecutive_failures: int = max_consecutive_failures
         
     def record_success(self) -> None:
         """Record a successful request."""
@@ -146,6 +152,10 @@ class EnhancedStellarStream:
     async def __aenter__(self) -> "EnhancedStellarStream":
         """Async context manager entry."""
         self._running = True
+        STREAM_CONNECTION_HEALTH.labels(
+            stream_type=self.config.stream_type,
+            horizon_url=self.config.horizon_url
+        ).set(1)
         logger.info(
             "EnhancedStellarStream initialized | horizon=%s stream=%s cursor=%s",
             self.config.horizon_url,
@@ -157,6 +167,10 @@ class EnhancedStellarStream:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
         self._running = False
+        STREAM_CONNECTION_HEALTH.labels(
+            stream_type=self.config.stream_type,
+            horizon_url=self.config.horizon_url
+        ).set(0)
         logger.info(
             "EnhancedStellarStream shutdown | processed=%d final_cursor=%s",
             self._processed_count,
@@ -164,7 +178,7 @@ class EnhancedStellarStream:
         )
         
     @retry(
-        retry=retry_if_exception_type((ConnectionError, RequestTimeoutError, ServerError)),
+        retry=retry_if_exception_type((ConnectionError, BaseHorizonError)),
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=1, min=1, max=60),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -175,40 +189,66 @@ class EnhancedStellarStream:
         try:
             root = await asyncio.to_thread(self.server.root)
             self.health_monitor.record_success()
+            STREAM_CONNECTION_HEALTH.labels(
+                stream_type=self.config.stream_type,
+                horizon_url=self.config.horizon_url
+            ).set(1)
             logger.debug("Server health check passed | horizon_version=%s", root.get("horizon_version"))
             return True
         except Exception as e:
             self.health_monitor.record_failure()
+            STREAM_ERRORS.labels(
+                stream_type=self.config.stream_type,
+                horizon_url=self.config.horizon_url,
+                error_type="health_check_failure"
+            ).inc()
+            STREAM_CONNECTION_HEALTH.labels(
+                stream_type=self.config.stream_type,
+                horizon_url=self.config.horizon_url
+            ).set(0)
             logger.warning("Server health check failed: %s", e)
             return False
     
-    async def _handle_rate_limit(self, rate_limit_error: RateLimitError) -> None:
+    async def _handle_rate_limit(self, error: BaseHorizonError) -> None:
         """Handle rate limit errors with adaptive backoff."""
         backoff = self.rate_tracker.handle_rate_limit()
-        reset_time = getattr(rate_limit_error, 'reset', None)
+        STREAM_RATE_LIMIT_BACKOFF.labels(
+            stream_type=self.config.stream_type,
+            horizon_url=self.config.horizon_url
+        ).set(backoff)
+        STREAM_ERRORS.labels(
+            stream_type=self.config.stream_type,
+            horizon_url=self.config.horizon_url,
+            error_type="rate_limit"
+        ).inc()
         
-        if reset_time:
-            reset_datetime = datetime.fromtimestamp(reset_time)
-            wait_time = max(0, (reset_datetime - datetime.now()).total_seconds())
-            logger.warning(
-                "Rate limit hit | reset_at=%s waiting=%.1fs adaptive_backoff=%.1fs",
-                reset_datetime.isoformat(),
-                wait_time,
-                backoff
-            )
-        else:
-            wait_time = backoff
-            logger.warning(
-                "Rate limit hit | waiting=%.1fs adaptive_backoff=%.1fs",
-                wait_time,
-                backoff
-            )
+        # In stellar-sdk, BaseHorizonError has a response attribute
+        reset_time = None
+        if hasattr(error, 'response') and error.response:
+            reset_time = error.response.headers.get('Retry-After')
+            if reset_time:
+                try:
+                    wait_time = float(reset_time)
+                    logger.warning(
+                        "Rate limit hit | waiting=%.1fs adaptive_backoff=%.1fs",
+                        wait_time,
+                        backoff
+                    )
+                    await asyncio.sleep(wait_time)
+                    return
+                except ValueError:
+                    pass
         
-        await asyncio.sleep(wait_time)
+        await asyncio.sleep(backoff)
     
     async def _handle_connection_error(self, error: Exception) -> None:
         """Handle connection errors with health monitoring."""
         self.health_monitor.record_failure()
+        STREAM_ERRORS.labels(
+            stream_type=self.config.stream_type,
+            horizon_url=self.config.horizon_url,
+            error_type="connection_error"
+        ).inc()
         
         if self.health_monitor.consecutive_failures >= self.health_monitor.max_consecutive_failures:
             logger.error(
@@ -284,32 +324,63 @@ class EnhancedStellarStream:
                 # Make the request
                 self.rate_tracker.record_request()
                 
+                start_time = time.time()
                 if self.config.stream_type == "effects":
                     records = await asyncio.to_thread(
-                        lambda: builder.call(limit=self.config.batch_size)
+                        lambda: builder.limit(self.config.batch_size).call()
                     )
                 else:  # operations
                     records = await asyncio.to_thread(
-                        lambda: builder.call(limit=self.config.batch_size)
+                        lambda: builder.limit(self.config.batch_size).call()
                     )
                 
                 # Reset retry count on success
                 retry_count = 0
                 self.health_monitor.record_success()
+                STREAM_CONNECTION_HEALTH.labels(
+                    stream_type=self.config.stream_type,
+                    horizon_url=self.config.horizon_url
+                ).set(1)
                 
                 # Process records
-                if not records.get("_embedded", {}).get("records"):
+                batch_records = records.get("_embedded", {}).get("records", [])
+                if not batch_records:
                     logger.debug("No records in response, waiting...")
                     await asyncio.sleep(1.0)
                     continue
                 
-                for record in records["_embedded"]["records"]:
+                for record in batch_records:
                     if not self._running:
                         break
                     
                     yield record
                     self._cursor = record.get("paging_token")
                     self._processed_count += 1
+                    
+                    # Update metrics per record
+                    STREAM_RECORDS_PROCESSED.labels(
+                        stream_type=self.config.stream_type,
+                        horizon_url=self.config.horizon_url
+                    ).inc()
+                
+                # Update batch metrics
+                duration = time.time() - start_time
+                STREAM_PROCESSING_LATENCY.labels(
+                    stream_type=self.config.stream_type,
+                    horizon_url=self.config.horizon_url
+                ).observe(duration)
+                
+                # Update cursor metric (try to parse numeric part if possible)
+                if self._cursor:
+                    try:
+                        # Paging tokens are often numeric strings or have numeric parts
+                        cursor_val = float(self._cursor.split('-')[0])
+                        STREAM_CURSOR.labels(
+                            stream_type=self.config.stream_type,
+                            horizon_url=self.config.horizon_url
+                        ).set(cursor_val)
+                    except (ValueError, IndexError):
+                        pass
                 
                 # Update cursor for next batch
                 if records.get("_links", {}).get("next", {}).get("href"):
@@ -318,11 +389,16 @@ class EnhancedStellarStream:
                         self._cursor = cursor
                         builder = builder.cursor(cursor)
                 
-            except RateLimitError as e:
-                await self._handle_rate_limit(e)
+            except BaseHorizonError as e:
+                if getattr(e, "status", None) == 429:
+                    await self._handle_rate_limit(e)
+                    continue
+                
+                retry_count += 1
+                await self._handle_connection_error(e)
                 continue
                 
-            except (ConnectionError, RequestTimeoutError, ServerError) as e:
+            except ConnectionError as e:
                 retry_count += 1
                 await self._handle_connection_error(e)
                 continue

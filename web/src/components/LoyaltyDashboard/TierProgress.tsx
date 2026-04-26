@@ -33,7 +33,7 @@ export function TierProgress({ currentTier, nextTier }: { currentTier: LoyaltyTi
         <div style={{ fontSize: 14, color: '#555' }}>Progress to Next Tier</div>
         <div style={{ fontSize: 24, fontWeight: 700 }}>{progress}%</div>
         {nextTier && (
-          <div style={{ fontSize: 12, color: '#777' }}>{nextTier.remainingToUpgrade.toLocaleString()} points to {nextTier.tier.name}</div>
+          <div style={{ fontSize: 12, color: '#777' }}>{nextTier.remainingToUpgrade} points to {nextTier.tier.name}</div>
         )}
         {!nextTier && <div style={{ fontSize: 12, color: '#777' }}>Top tier achieved</div>}
       </div>

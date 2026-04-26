@@ -114,14 +114,19 @@ def sample_neighbors(
         neighbors = src[dst == v]
         if neighbors.numel() == 0:
             continue
-        
-        # Sample with replacement if neighbors < num_samples
-        perm = torch.randperm(neighbors.size(0))
+
         if num_samples > 0:
-            idx = perm[:num_samples]
-            if neighbors.size(0) < num_samples:
-                # pad or just take what we have
-                pass
+            if neighbors.size(0) >= num_samples:
+                idx = torch.randperm(neighbors.size(0), device=neighbors.device)[:num_samples]
+            else:
+                # Repeat with replacement until the requested sample size is met.
+                idx = torch.randint(
+                    low=0,
+                    high=neighbors.size(0),
+                    size=(num_samples,),
+                    dtype=torch.long,
+                    device=neighbors.device,
+                )
             s_neighbors = neighbors[idx]
         else:
             s_neighbors = neighbors

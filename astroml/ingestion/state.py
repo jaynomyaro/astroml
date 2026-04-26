@@ -64,3 +64,36 @@ class StateStore:
             state.last_processed_ledger = max(state.last_processed_ledger, ledger_id)
         self.save(state)
         return state
+
+
+class StreamStateManager:
+    """Manages cursors for multiple streams."""
+
+    def __init__(self, path: str = DEFAULT_STATE_FILE) -> None:
+        self.path = path
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self._cursors: dict[str, str] = self._load_cursors()
+
+    def _load_cursors(self) -> dict[str, str]:
+        if not os.path.exists(self.path):
+            return {}
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("cursors", {})
+        except (json.JSONDecodeError, IOError):
+            return {}
+
+    def save_cursor(self, stream_id: str, cursor: str) -> None:
+        self._cursors[stream_id] = cursor
+        self._save()
+
+    def get_cursor(self, stream_id: str) -> Optional[str]:
+        return self._cursors.get(stream_id)
+
+    def _save(self) -> None:
+        data = {"cursors": self._cursors}
+        tmp_path = f"{self.path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, self.path)

@@ -1,0 +1,77 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Ingestion Throughput",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(astroml_ingestion_records_total[1m])",
+          "legendFormat": "{{stream_type}} - {{horizon_url}}"
+        }
+      ]
+    },
+    {
+      "title": "Error Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(astroml_ingestion_errors_total[1m])",
+          "legendFormat": "{{stream_type}} - {{error_type}}"
+        }
+      ]
+    },
+    {
+      "title": "Connection Health",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "astroml_ingestion_connection_health",
+          "legendFormat": "{{stream_type}}"
+        }
+      ]
+    },
+    {
+      "title": "Rate Limit Backoff",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "astroml_ingestion_rate_limit_backoff_seconds",
+          "legendFormat": "{{stream_type}}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 26,
+  "style": "dark",
+  "tags": ["astroml", "ingestion"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "AstroML Ingestion Dashboard",
+  "uid": "astroml_ingestion",
+  "version": 1
+}

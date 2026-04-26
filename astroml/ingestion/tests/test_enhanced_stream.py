@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import pytest
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from stellar_sdk.exceptions import RateLimitError, ConnectionError
+from stellar_sdk.exceptions import BaseHorizonError, ConnectionError
 
 from astroml.ingestion.enhanced_stream import (
     EnhancedStellarStream,
@@ -104,26 +105,26 @@ class TestConnectionHealthMonitor:
         assert monitor.should_check_health()
         
         # Just checked
-        monitor.last_health_check = asyncio.get_event_loop().time()
+        monitor.last_health_check = time.time()
         assert not monitor.should_check_health()
         
         # Interval passed
-        monitor.last_health_check = asyncio.get_event_loop().time() - 31.0
+        monitor.last_health_check = time.time() - 31.0
         assert monitor.should_check_health()
     
     def test_is_connection_stale(self):
         """Test connection staleness detection."""
         monitor = ConnectionHealthMonitor(check_interval=30.0)
-        
+    
         # No successful requests yet
         assert not monitor.is_connection_stale()
-        
+    
         # Recent success
-        monitor.last_successful_request = asyncio.get_event_loop().time() - 10.0
+        monitor.last_successful_request = time.time() - 10.0
         assert not monitor.is_connection_stale()
         
         # Stale connection
-        monitor.last_successful_request = asyncio.get_event_loop().time() - 61.0
+        monitor.last_successful_request = time.time() - 61.0
         assert monitor.is_connection_stale()
 
 
@@ -171,30 +172,35 @@ class TestEnhancedStellarStream:
     async def test_check_server_health_failure(self, stream):
         """Test failed server health check."""
         mock_server = MagicMock()
-        mock_server.root.side_effect = ConnectionError("Connection failed")
+        mock_server.root = MagicMock(side_effect=ConnectionError("Connection failed"))
         stream.server = mock_server
-        
+    
         result = await stream._check_server_health()
-        
+    
         assert result is False
-        assert not stream.health_monitor.is_healthy
+        # The monitor record_failure was called, but threshold is 3
         assert stream.health_monitor.consecutive_failures == 1
     
     @pytest.mark.asyncio
     async def test_handle_rate_limit(self, stream):
         """Test rate limit handling."""
-        # Create rate limit error with reset time
-        reset_time = asyncio.get_event_loop().time() + 10
-        rate_limit_error = RateLimitError("Rate limit exceeded")
-        rate_limit_error.reset = reset_time
+        # Create a mock BaseHorizonError with 429 status
+        mock_response = MagicMock()
+        mock_response.headers = MagicMock()
+        mock_response.headers.get.return_value = '10'
         
-        with patch('asyncio.sleep') as mock_sleep:
-            await stream._handle_rate_limit(rate_limit_error)
-            
-            # Should sleep for the calculated time
-            mock_sleep.assert_called_once()
-            sleep_args = mock_sleep.call_args[0]
-            assert sleep_args[0] > 0
+        # We manually add .response because BaseHorizonError might not keep it
+        error = BaseHorizonError(response=mock_response)
+        error.response = mock_response
+        error.status = 429
+    
+        stream._running = True # Ensure running
+        with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            await stream._handle_rate_limit(error)
+    
+            # Should have called sleep with the Retry-After value
+            mock_sleep.assert_called_with(10.0)
+            assert stream.rate_tracker.current_backoff > 1.0
     
     @pytest.mark.asyncio
     async def test_handle_connection_error(self, stream):
@@ -211,9 +217,11 @@ class TestEnhancedStellarStream:
     @pytest.mark.asyncio
     async def test_stream_effects_basic(self, stream):
         """Test basic effects streaming."""
+        stream._running = True
         # Mock the server effects call
         mock_effects_builder = MagicMock()
         mock_effects_builder.cursor.return_value = mock_effects_builder
+        mock_effects_builder.limit.return_value = mock_effects_builder
         mock_effects_builder.call.return_value = {
             "_embedded": {
                 "records": [
@@ -229,9 +237,12 @@ class TestEnhancedStellarStream:
                 ]
             }
         }
-        
+    
+        stream.server = MagicMock()
         stream.server.effects.return_value = mock_effects_builder
-        
+        # Mock root for health check
+        stream.server.root.return_value = {"horizon_version": "1.0.0"}
+    
         # Mock the persistence method
         with patch.object(stream, '_persist_effect', new_callable=AsyncMock):
             # Get first batch
@@ -246,12 +257,14 @@ class TestEnhancedStellarStream:
     @pytest.mark.asyncio
     async def test_stream_operations_basic(self, stream):
         """Test basic operations streaming."""
+        stream._running = True
         # Change to operations stream
         stream.config.stream_type = "operations"
-        
+    
         # Mock the server operations call
         mock_operations_builder = MagicMock()
         mock_operations_builder.cursor.return_value = mock_operations_builder
+        mock_operations_builder.limit.return_value = mock_operations_builder
         mock_operations_builder.call.return_value = {
             "_embedded": {
                 "records": [
@@ -269,8 +282,11 @@ class TestEnhancedStellarStream:
                 ]
             }
         }
-        
+    
+        stream.server = MagicMock()
         stream.server.operations.return_value = mock_operations_builder
+        # Mock root for health check
+        stream.server.root.return_value = {"horizon_version": "1.0.0"}
         
         # Mock the persistence method
         with patch.object(stream, '_persist_operation', new_callable=AsyncMock):
@@ -286,30 +302,35 @@ class TestEnhancedStellarStream:
     @pytest.mark.asyncio
     async def test_stream_with_retry_rate_limit(self, stream):
         """Test streaming with rate limit retry."""
+        stream._running = True
         mock_builder = MagicMock()
+        mock_builder.limit.return_value = mock_builder
         
         # First call raises rate limit, second succeeds
-        rate_limit_error = RateLimitError("Rate limit exceeded")
-        rate_limit_error.reset = asyncio.get_event_loop().time() + 1
-        
+        mock_response = MagicMock()
+        mock_response.headers = MagicMock()
+        mock_response.headers.get.return_value = '1'
+        rate_limit_error = BaseHorizonError(response=mock_response)
+        rate_limit_error.status = 429
+    
         mock_builder.call.side_effect = [
             rate_limit_error,
             {
                 "_embedded": {"records": []}
             }
         ]
-        
+    
         # Mock rate limit handling
-        with patch.object(stream, '_handle_rate_limit', new_callable=AsyncMock), \
+        with patch.object(stream, '_handle_rate_limit', new_callable=AsyncMock) as mock_handle, \
              patch.object(stream, '_check_server_health', new_callable=AsyncMock, return_value=True):
-            
+    
             records = []
             async for record in stream._stream_with_retry(mock_builder):
                 records.append(record)
                 break
-            
+    
             # Should have handled rate limit and continued
-            assert stream._handle_rate_limit.called
+            assert mock_handle.called
     
     @pytest.mark.asyncio
     async def test_get_stats(self, stream):
@@ -350,6 +371,7 @@ async def test_integration_basic_stream():
         
         mock_effects_builder = MagicMock()
         mock_effects_builder.cursor.return_value = mock_effects_builder
+        mock_effects_builder.limit.return_value = mock_effects_builder
         mock_effects_builder.call.return_value = {
             "_embedded": {"records": []}  # Empty response
         }

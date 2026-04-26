@@ -12,6 +12,8 @@ import sys
 from datetime import datetime
 from typing import Dict, List, Optional, Set
 
+from prometheus_client import start_http_server
+
 from astroml.ingestion.enhanced_stream import EnhancedStellarStream, EnhancedStreamConfig
 from astroml.ingestion.state import StreamStateManager
 
@@ -130,8 +132,12 @@ class StreamService:
     def _handle_signal(self, sig: signal.Signals) -> None:
         """Handle shutdown signals."""
         logger.info("Received signal %s, initiating shutdown...", sig.name)
+        self.stop()
+
+    def stop(self) -> None:
+        """Signal the service to stop."""
         self._shutdown_event.set()
-    
+
     def get_service_stats(self) -> Dict[str, any]:
         """Get comprehensive service statistics."""
         stats = {
@@ -150,10 +156,12 @@ class StreamService:
 class MultiHorizonService:
     """Service for managing streams across multiple Horizon instances."""
     
-    def __init__(self) -> None:
+    def __init__(self, prometheus_port: int = 8000) -> None:
         self.services: Dict[str, StreamService] = {}
         self._running: bool = False
         self._shutdown_event = asyncio.Event()
+        self.tasks: List[asyncio.Task] = []
+        self.prometheus_port = prometheus_port
     
     def add_horizon_service(self, horizon_url: str, stream_types: List[str]) -> None:
         """Add a service for a specific Horizon instance."""
@@ -174,32 +182,83 @@ class MultiHorizonService:
     async def start_all(self) -> None:
         """Start all Horizon services concurrently."""
         self._running = True
+        self._install_signal_handlers()
+        
+        # Start Prometheus metrics server
+        try:
+            start_http_server(self.prometheus_port)
+            logger.info("Prometheus metrics server started on port %d", self.prometheus_port)
+        except Exception as e:
+            logger.error("Failed to start Prometheus metrics server: %s", e)
         
         logger.info("Starting %d Horizon services", len(self.services))
         
-        tasks = []
         for service_id, service in self.services.items():
             task = asyncio.create_task(self._run_service_with_monitoring(service_id, service))
-            tasks.append(task)
+            self.tasks.append(task)
         
-        # Wait for all services or shutdown
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for shutdown event
+        await self._shutdown_event.wait()
+        await self.stop_all()
+        
+        # Wait for all service tasks to complete
+        if self.tasks:
+            await asyncio.gather(*self.tasks, return_exceptions=True)
+        
+        logger.info("Multi-horizon service shutdown complete")
     
     async def _run_service_with_monitoring(self, service_id: str, service: StreamService) -> None:
         """Run a service with monitoring."""
         try:
             await service.start()
+        except asyncio.CancelledError:
+            logger.info("Service %s cancelled", service_id)
         except Exception as e:
             logger.error("Service %s failed: %s", service_id, e)
         finally:
-            if not self._shutdown_event.is_set():
-                self._shutdown_event.set()
+            if self._running and not self._shutdown_event.is_set():
+                # If a service fails unexpectedly while we are still "running", 
+                # we might want to shut down everything or just log it.
+                # For now, let's just log it.
+                logger.warning("Service %s stopped unexpectedly", service_id)
     
     async def stop_all(self) -> None:
         """Stop all services."""
+        if not self._running:
+            return
+            
         logger.info("Stopping all Horizon services...")
         self._running = False
+        
+        for service in self.services.values():
+            service.stop()
+            
         self._shutdown_event.set()
+
+    def _install_signal_handlers(self) -> None:
+        """Install signal handlers for graceful shutdown."""
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, self._handle_signal, sig)
+    
+    def _handle_signal(self, sig: signal.Signals) -> None:
+        """Handle shutdown signals."""
+        logger.info("Received signal %s, initiating multi-service shutdown...", sig.name)
+        self._shutdown_event.set()
+
+    def get_all_stats(self) -> Dict[str, any]:
+        """Get aggregated statistics from all services."""
+        all_stats = {
+            "timestamp": datetime.now().isoformat(),
+            "running": self._running,
+            "services_count": len(self.services),
+            "services": {}
+        }
+        
+        for service_id, service in self.services.items():
+            all_stats["services"][service_id] = service.get_service_stats()
+            
+        return all_stats
 
 
 # ---------------------------------------------------------------------------

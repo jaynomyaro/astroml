@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: astroml-config
+  namespace: astroml
+data:
+  DATABASE_URL: "postgresql://astroml:astroml_secure_password_change_me@postgres:5432/astroml"
+  REDIS_URL: "redis://redis:6379/0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: astroml-ingestion
+  namespace: astroml
+  labels:
+    app: astroml-ingestion
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: astroml-ingestion
+  template:
+    metadata:
+      labels:
+        app: astroml-ingestion
+    spec:
+      serviceAccountName: astroml
+      containers:
+      - name: ingestion
+        image: astroml:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: astroml-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: astroml-config
+              key: REDIS_URL
+        command: ["python", "-m", "astroml.ingestion.backfill"]
+        args: ["--start-ledger", "1000000", "--end-ledger", "1100000"]
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+      restartPolicy: OnFailure
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: astroml-ingestion-cron
+  namespace: astroml
+spec:
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: astroml
+          containers:
+          - name: ingestion
+            image: astroml:latest
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: astroml-config
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: astroml-config
+                  key: REDIS_URL
+            command: ["python", "-m", "astroml.ingestion.backfill"]
+            args: ["--start-ledger", "1000000", "--end-ledger", "1100000"]
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "500m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+          restartPolicy: OnFailure
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: astroml-training
+  namespace: astroml
+  labels:
+    app: astroml-training
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: astroml-training
+  template:
+    metadata:
+      labels:
+        app: astroml-training
+    spec:
+      serviceAccountName: astroml
+      containers:
+      - name: training
+        image: astroml:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: astroml-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: astroml-config
+              key: REDIS_URL
+        command: ["python", "train.py"]
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: models
+          mountPath: /app/models
+      volumes:
+      - name: models
+        emptyDir: {}

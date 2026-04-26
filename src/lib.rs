@@ -1,8 +1,11 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String, Vec, Symbol, Bytes};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Map,
+    String, Symbol, Vec,
+};
 
 // Contract state storage keys
-const DATA_KEY: Symbol = Symbol::short("DATA");
+const DATA_KEY: Symbol = symbol_short!("DATA");
 
 // Contract type definitions
 #[contracttype]
@@ -17,7 +20,7 @@ pub struct FraudReport {
     /// Reason/evidence for the fraud report
     pub reason: String,
     /// Confidence level (0-100) of the fraud assessment
-    pub confidence: u8,
+    pub confidence: u32,
     /// Evidence data hash (optional)
     pub evidence_hash: Option<Bytes>,
 }
@@ -28,7 +31,7 @@ pub struct Validator {
     /// Validator's address
     pub address: Address,
     /// Validator's reputation score (0-100)
-    pub reputation: u8,
+    pub reputation: u32,
     /// Number of reports submitted by this validator
     pub report_count: u64,
     /// Number of accurate reports (verified as correct)
@@ -49,15 +52,16 @@ pub struct FraudRegistryData {
     /// Admin address that can manage validators
     pub admin: Address,
     /// Minimum reputation required to submit reports
-    pub min_reputation: u8,
+    pub min_reputation: u32,
     /// Minimum confidence required for reports
-    pub min_confidence: u8,
+    pub min_confidence: u32,
     /// Number of validators required to mark an account as fraudulent
-    pub consensus_threshold: u8,
+    pub consensus_threshold: u32,
 }
 
 /// Errors that can be returned by the contract
-#[contracttype]
+#[contracterror]
+#[repr(u32)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     /// Unauthorized access
@@ -85,7 +89,7 @@ pub struct FraudRegistry;
 #[contractimpl]
 impl FraudRegistry {
     /// Initialize the contract with an admin address
-    pub fn __init__(env: Env, admin: Address) {
+    pub fn initialize(env: Env, admin: Address) {
         let data = FraudRegistryData {
             fraud_reports: Map::new(&env),
             validators: Map::new(&env),
@@ -108,7 +112,7 @@ impl FraudRegistry {
         env: Env,
         admin: Address,
         validator_address: Address,
-        initial_reputation: u8,
+        initial_reputation: u32,
     ) -> Result<(), Error> {
         let mut data = Self::get_data(&env);
         
@@ -118,15 +122,15 @@ impl FraudRegistry {
         }
         
         // Check if validator already exists
-        if data.validators.contains_key(validator_address) {
+        if data.validators.contains_key(validator_address.clone()) {
             return Err(Error::ValidatorAlreadyExists);
         }
-        
+
         // Validate reputation
         if initial_reputation > 100 {
             return Err(Error::InvalidInput);
         }
-        
+
         let validator = Validator {
             address: validator_address.clone(),
             reputation: initial_reputation,
@@ -155,13 +159,13 @@ impl FraudRegistry {
         validator: Address,
         account_id: Address,
         reason: String,
-        confidence: u8,
+        confidence: u32,
         evidence_hash: Option<Bytes>,
     ) -> Result<(), Error> {
         let mut data = Self::get_data(&env);
         
         // Check if validator exists and is active
-        let validator_info = match data.validators.get(validator) {
+        let validator_info = match data.validators.get(validator.clone()) {
             Some(v) => v,
             None => return Err(Error::ValidatorNotFound),
         };
@@ -235,8 +239,9 @@ impl FraudRegistry {
             let mut validators_seen = Vec::new(&env);
             
             for report in reports.iter() {
-                if !validators_seen.contains(report.validator) {
-                    validators_seen.push_back(report.validator);
+                let report_validator = report.validator.clone();
+                if !validators_seen.contains(report_validator.clone()) {
+                    validators_seen.push_back(report_validator);
                     validator_count += 1;
                 }
             }
@@ -266,7 +271,7 @@ impl FraudRegistry {
         env: Env,
         admin: Address,
         validator_address: Address,
-        new_reputation: u8,
+        new_reputation: u32,
     ) -> Result<(), Error> {
         let mut data = Self::get_data(&env);
         
@@ -281,11 +286,11 @@ impl FraudRegistry {
         }
         
         // Update validator
-        let mut validator = match data.validators.get(validator_address) {
+        let mut validator = match data.validators.get(validator_address.clone()) {
             Some(v) => v,
             None => return Err(Error::ValidatorNotFound),
         };
-        
+
         validator.reputation = new_reputation;
         data.validators.set(validator_address, validator);
         
@@ -308,11 +313,11 @@ impl FraudRegistry {
         }
         
         // Update validator
-        let mut validator = match data.validators.get(validator_address) {
+        let mut validator = match data.validators.get(validator_address.clone()) {
             Some(v) => v,
             None => return Err(Error::ValidatorNotFound),
         };
-        
+
         validator.is_active = false;
         data.validators.set(validator_address, validator);
         
@@ -325,9 +330,9 @@ impl FraudRegistry {
     pub fn update_config(
         env: Env,
         admin: Address,
-        min_reputation: Option<u8>,
-        min_confidence: Option<u8>,
-        consensus_threshold: Option<u8>,
+        min_reputation: Option<u32>,
+        min_confidence: Option<u32>,
+        consensus_threshold: Option<u32>,
     ) -> Result<(), Error> {
         let mut data = Self::get_data(&env);
         
@@ -336,7 +341,24 @@ impl FraudRegistry {
             return Err(Error::Unauthorized);
         }
         
-        // Update configuration
+        // Validate inputs before applying
+        if let Some(rep) = min_reputation {
+            if rep > 100 {
+                return Err(Error::InvalidInput);
+            }
+        }
+        if let Some(conf) = min_confidence {
+            if conf > 100 {
+                return Err(Error::InvalidInput);
+            }
+        }
+        if let Some(thresh) = consensus_threshold {
+            if thresh == 0 {
+                return Err(Error::InvalidInput);
+            }
+        }
+
+        // Apply configuration
         if let Some(rep) = min_reputation {
             data.min_reputation = rep;
         }
@@ -353,7 +375,7 @@ impl FraudRegistry {
     }
 
     /// Get contract configuration
-    pub fn get_config(env: Env) -> (u8, u8, u8) {
+    pub fn get_config(env: Env) -> (u32, u32, u32) {
         let data = Self::get_data(&env);
         (data.min_reputation, data.min_confidence, data.consensus_threshold)
     }
@@ -366,3 +388,6 @@ impl FraudRegistry {
 
 #[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod security_tests;

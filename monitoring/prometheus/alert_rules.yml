@@ -1,0 +1,38 @@
+groups:
+  - name: astroml_ingestion_alerts
+    rules:
+      - alert: IngestionConnectionDown
+        expr: astroml_ingestion_connection_health == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ingestion connection down for {{ $labels.stream_type }} on {{ $labels.horizon_url }}"
+          description: "The ingestion stream for {{ $labels.stream_type }} has been unhealthy for more than 5 minutes."
+
+      - alert: HighIngestionErrorRate
+        expr: rate(astroml_ingestion_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate for {{ $labels.stream_type }} on {{ $labels.horizon_url }}"
+          description: "The error rate for {{ $labels.stream_type }} ingestion is currently {{ $value }} errors/sec."
+
+      - alert: IngestionStalled
+        expr: rate(astroml_ingestion_records_total[10m]) == 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ingestion stalled for {{ $labels.stream_type }} on {{ $labels.horizon_url }}"
+          description: "No records have been processed for {{ $labels.stream_type }} in the last 15 minutes."
+
+      - alert: PersistentRateLimit
+        expr: astroml_ingestion_rate_limit_backoff_seconds > 60
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Persistent rate limiting for {{ $labels.stream_type }}"
+          description: "The ingestion service is facing persistent rate limiting with backoff > 60s for over 10 minutes."

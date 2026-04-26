@@ -56,3 +56,21 @@ export type TierComparisonDatum = {
   multiplier: number
   retention: number
 }
+
+export type FraudAlert = {
+  id: string
+  accountId: string
+  pattern: 'sybil_cluster' | 'wash_trading_loop' | 'anomaly'
+  riskScore: number // 0..100
+  detectedAt: string // ISO
+  description: string
+}
+
+export type FraudStats = {
+  totalAlerts: number
+  highRisk: number
+  mediumRisk: number
+  lowRisk: number
+  recentAlerts: FraudAlert[]
+  riskOverTime: { date: string; score: number }[]
+}

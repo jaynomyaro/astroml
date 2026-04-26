@@ -22,6 +22,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Path to state file (defaults to ./.astroml_state/ingestion_state.json)",
     )
 
+    preprocess = sub.add_parser(
+        "preprocess-backfill",
+        help="Preprocess large ledger backfill datasets using Polars",
+    )
+    preprocess.add_argument(
+        "--input",
+        required=True,
+        help="Input file or directory (csv, parquet, ndjson/jsonl).",
+    )
+    preprocess.add_argument(
+        "--output",
+        required=True,
+        help="Output Parquet path.",
+    )
+    preprocess.add_argument(
+        "--input-format",
+        choices=["parquet", "csv", "ndjson", "jsonl"],
+        default=None,
+        help="Optional explicit input format.",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "ingest":
@@ -49,6 +70,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             "processed": result.processed,
             "skipped": result.skipped,
         }, indent=2))
+        return 0
+
+    if args.command == "preprocess-backfill":
+        from .preprocessing.ledger_backfill import preprocess_to_parquet
+
+        output_path = preprocess_to_parquet(
+            input_path=args.input,
+            output_path=args.output,
+            input_format=args.input_format,
+        )
+        print(json.dumps({"output": str(output_path)}, indent=2))
         return 0
 
     parser.print_help()

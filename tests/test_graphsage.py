@@ -64,3 +64,29 @@ def test_sample_neighbors():
     assert dst.numel() == 1
     assert dst[0] == 1
     assert src[0] in [0, 2]
+
+
+def test_sample_neighbors_padding():
+    from astroml.features.gnn.sage import sample_neighbors
+
+    # 0->1, only one neighbor for node 1
+    edge_index = torch.tensor([[0], [1]], dtype=torch.long)
+    nodes = torch.tensor([1])
+
+    src, dst = sample_neighbors(edge_index, nodes, num_samples=3)
+    assert src.shape == (3,)
+    assert dst.shape == (3,)
+    assert torch.all(dst == 1)
+    assert torch.all((src == 0))
+
+
+def test_sample_neighbors_empty_returns_no_edges():
+    from astroml.features.gnn.sage import sample_neighbors
+
+    # Node 2 has no incoming neighbors
+    edge_index = torch.tensor([[0, 1], [1, 1]], dtype=torch.long)
+    nodes = torch.tensor([2])
+
+    src, dst = sample_neighbors(edge_index, nodes, num_samples=2)
+    assert src.numel() == 0
+    assert dst.numel() == 0

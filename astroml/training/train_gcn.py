@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import NormalizeFeatures
+
 from astroml.models.gcn import GCN
 
 
@@ -13,15 +14,15 @@ def train():
 
     model = GCN(
         input_dim=dataset.num_node_features,
-        hidden_dims=[64],
+        hidden_dim=16,
         output_dim=dataset.num_classes,
         dropout=0.5,
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
 
-    model.train()
-    for epoch in range(200):
+    for epoch in range(1, 201):
+        model.train()
         optimizer.zero_grad()
         out = model(data.x, data.edge_index)
         loss = F.nll_loss(out[data.train_mask], data.y[data.train_mask])
@@ -29,19 +30,17 @@ def train():
         optimizer.step()
 
         if epoch % 20 == 0:
-            print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+            val_acc = _accuracy(model, data, data.val_mask)
+            print(f"Epoch {epoch:3d} | Loss: {loss.item():.4f} | Val Acc: {val_acc:.4f}")
 
-    test(model, data)
+    print(f"Test Accuracy: {_accuracy(model, data, data.test_mask):.4f}")
 
 
-def test(model, data):
+def _accuracy(model: GCN, data, mask) -> float:
     model.eval()
-    out = model(data.x, data.edge_index)
-    pred = out.argmax(dim=1)
-
-    correct = (pred[data.test_mask] == data.y[data.test_mask]).sum()
-    acc = int(correct) / int(data.test_mask.sum())
-    print(f"Test Accuracy: {acc:.4f}")
+    with torch.no_grad():
+        pred = model(data.x, data.edge_index).argmax(dim=1)
+    return float((pred[mask] == data.y[mask]).sum()) / float(mask.sum())
 
 
 if __name__ == "__main__":

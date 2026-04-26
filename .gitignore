@@ -7,3 +7,10 @@ build/
 .pytest_cache/
 venv/
 .env
+# Rust build outputs
+target/
+target_local/
+.agents/
+.claude/
+skills-lock.json
+issue.md

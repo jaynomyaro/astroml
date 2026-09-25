@@ -14,14 +14,13 @@ Input and output files support either:
 - JSON lines (JSONL), one transaction object per line
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import argparse
 import json
 import pathlib
 import random
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
-
 
 DEFAULT_SOURCE_FIELD = "source_account"
 DEFAULT_DEST_FIELD = "destination_account"
@@ -259,7 +258,9 @@ def run_injection(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Inject synthetic fraud patterns into a ledger copy")
+    parser = argparse.ArgumentParser(
+        description="Inject synthetic fraud patterns into a ledger copy"
+    )
     parser.add_argument("--input", required=True, help="Path to clean ledger file (JSON or JSONL)")
     parser.add_argument("--output", required=True, help="Path to augmented output ledger")
     parser.add_argument("--summary", default=None, help="Optional path for JSON summary output")

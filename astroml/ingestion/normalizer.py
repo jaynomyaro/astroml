@@ -1,7 +1,6 @@
 """Transaction normalizer for extracting structured data from Horizon operations."""
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 from astroml.db.schema import NormalizedTransaction
 from astroml.ingestion.parsers import (
@@ -32,7 +31,9 @@ def normalize_operation(data: dict) -> NormalizedTransaction:
     if asset_code == "XLM" and asset_issuer is None:
         normalized_asset = "XLM"
     else:
-        normalized_asset = f"{asset_code}:{asset_issuer}" if asset_code and asset_issuer else "UNKNOWN"
+        normalized_asset = (
+            f"{asset_code}:{asset_issuer}" if asset_code and asset_issuer else "UNKNOWN"
+        )
 
     timestamp = _parse_datetime(data["created_at"])
     transaction_hash = data["transaction_hash"]

@@ -1,0 +1,37 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3.10
+        args: ["--line-length=100", "--target-version=py310"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.7
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: package.lock.json|go.sum|pnpm-lock.yaml|yarn.lock|poetry.lock
+
+  - repo: local
+    hooks:
+      - id: radon
+        name: Check code complexity with Radon
+        entry: radon
+        language: python
+        additional_dependencies: ["radon==6.0.1"]
+        args: ["cc", "-nc", "-s", "-i"]
+
+      - id: docstring-coverage
+        name: Check public API docstring coverage
+        entry: interrogate
+        language: python
+        additional_dependencies: ["interrogate>=1.7.0,<2.0"]
+        args: ["astroml", "api", "tests"]
+        pass_filenames: false

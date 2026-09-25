@@ -130,11 +130,9 @@ def test_horizon_stream_graceful_shutdown():
                     break
 
             writer.write(
-                (
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: text/event-stream\r\n"
-                    "Connection: close\r\n\r\n"
-                ).encode("utf-8")
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/event-stream\r\n"
+                b"Connection: close\r\n\r\n"
             )
             await writer.drain()
 

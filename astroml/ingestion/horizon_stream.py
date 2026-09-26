@@ -7,10 +7,11 @@ import inspect
 import json
 import logging
 import ssl
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlencode, urlparse
 
-Transaction = Dict[str, Any]
+Transaction = dict[str, Any]
 TransactionHandler = Callable[[Transaction], Any]
 
 
@@ -29,7 +30,7 @@ class HorizonStreamingClient:
         cursor: str = "now",
         reconnect_delay: float = 1.0,
         max_reconnect_delay: float = 30.0,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         parsed = urlparse(base_url)
         if parsed.scheme not in {"http", "https"}:
@@ -46,8 +47,8 @@ class HorizonStreamingClient:
         self._max_reconnect_delay = max_reconnect_delay
         self._logger = logger or logging.getLogger(__name__)
         self._stop_event = asyncio.Event()
-        self._task: Optional[asyncio.Task[None]] = None
-        self._writer: Optional[asyncio.StreamWriter] = None
+        self._task: asyncio.Task[None] | None = None
+        self._writer: asyncio.StreamWriter | None = None
 
     @property
     def cursor(self) -> str:
@@ -84,17 +85,13 @@ class HorizonStreamingClient:
                 if self._stop_event.is_set():
                     break
                 delay = self._reconnect_delay
-                self._logger.warning(
-                    "Horizon stream disconnected. Reconnecting in %.2fs", delay
-                )
+                self._logger.warning("Horizon stream disconnected. Reconnecting in %.2fs", delay)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 if self._stop_event.is_set():
                     break
-                self._logger.exception(
-                    "Horizon stream error. Reconnecting in %.2fs", delay
-                )
+                self._logger.exception("Horizon stream error. Reconnecting in %.2fs", delay)
 
             if self._stop_event.is_set():
                 break
@@ -105,9 +102,7 @@ class HorizonStreamingClient:
         self._logger.info("Horizon streaming client stopped")
 
     async def _consume_stream(self, on_transaction: TransactionHandler) -> None:
-        ssl_context = (
-            ssl.create_default_context() if self._base_url.scheme == "https" else None
-        )
+        ssl_context = ssl.create_default_context() if self._base_url.scheme == "https" else None
         port = self._base_url.port or (443 if self._base_url.scheme == "https" else 80)
         host_header = self._base_url.hostname
         if self._base_url.port is not None:

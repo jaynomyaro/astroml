@@ -9,7 +9,8 @@ A `log_scale` option lets callers work in log-space (useful when amounts span
 many orders of magnitude). Inputs may be scalars, NumPy arrays, or pandas
 Series; outputs preserve the input shape and type where reasonable.
 """
-from typing import Union, Optional
+
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,7 @@ def net_flow_ratio(
     log_scale: bool = False,
     log_base: float = 10.0,
     eps: float = 1e-9,
-) -> Union[float, np.ndarray, pd.Series]:
+) -> float | np.ndarray | pd.Series:
     """Compute net flow ratio = (sent - received) / (sent + received).
 
     Args:

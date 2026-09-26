@@ -2,7 +2,29 @@ import asyncio
 import json
 from urllib.parse import parse_qs, urlparse
 
-from astroml.ingestion import HorizonStreamingClient
+import pytest
+
+from astroml.ingestion import HorizonStreamError, HorizonStreamingClient
+
+
+def test_package_exports_horizon_streaming_client():
+    """Guard against `astroml.ingestion`'s __init__ dropping these exports again.
+
+    `HorizonStreamingClient`/`HorizonStreamError` are defined in
+    `astroml.ingestion.horizon_stream` but must also be importable from the
+    `astroml.ingestion` package root, since callers (including this test
+    module) import them that way (issue #976).
+    """
+    import astroml.ingestion as ingestion_pkg
+    from astroml.ingestion.horizon_stream import (
+        HorizonStreamError as DirectHorizonStreamError,
+    )
+    from astroml.ingestion.horizon_stream import (
+        HorizonStreamingClient as DirectHorizonStreamingClient,
+    )
+
+    assert ingestion_pkg.HorizonStreamingClient is DirectHorizonStreamingClient
+    assert ingestion_pkg.HorizonStreamError is DirectHorizonStreamError
 
 
 def test_horizon_stream_ingests_transactions():
@@ -130,11 +152,9 @@ def test_horizon_stream_graceful_shutdown():
                     break
 
             writer.write(
-                (
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: text/event-stream\r\n"
-                    "Connection: close\r\n\r\n"
-                ).encode("utf-8")
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/event-stream\r\n"
+                b"Connection: close\r\n\r\n"
             )
             await writer.drain()
 
@@ -170,5 +190,37 @@ def test_horizon_stream_graceful_shutdown():
             await server.wait_closed()
 
         assert client._task is None
+
+    asyncio.run(run_test())
+
+
+def test_horizon_stream_raises_on_non_200_status():
+    """`_consume_stream` surfaces a `HorizonStreamError` for non-200 responses."""
+
+    async def run_test():
+        async def handler(reader, writer):
+            await reader.readline()
+            while True:
+                line = await reader.readline()
+                if line in {b"\r\n", b"\n", b""}:
+                    break
+            writer.write(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        client = HorizonStreamingClient(base_url=f"http://127.0.0.1:{port}")
+
+        async def on_transaction(_tx):
+            return None
+
+        try:
+            with pytest.raises(HorizonStreamError, match="503"):
+                await client._consume_stream(on_transaction)
+        finally:
+            server.close()
+            await server.wait_closed()
 
     asyncio.run(run_test())

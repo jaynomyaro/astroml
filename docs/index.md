@@ -18,9 +18,16 @@ AstroML is a comprehensive machine learning framework for the Stellar network, p
 - [Transaction Graph Analysis](transaction_graph.md)
 - [Feature Engineering Pipeline](feature_pipeline.md)
 
+### Autonomous Agents
+- [LLM Agent Framework](agent-framework.md)
+
 ### Configuration & Experiments
 - [Experiment Configuration](experiment-configs.md)
 - [Hydra Setup Guide](hydra-setup.md)
+
+### Performance & Scaling
+- [Scaling and Performance Optimization](scaling-optimization.md)
+- [Benchmarking Suite](benchmarking.md)
 
 ### Deployment
 - [Docker Deployment](docker-deployment.md)

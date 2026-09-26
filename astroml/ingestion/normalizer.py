@@ -1,7 +1,16 @@
-"""Transaction normalizer for extracting structured data from Horizon operations."""
+"""Transaction normalizer for extracting structured data from Horizon operations.
+
+Also usable as a CLI: ``python -m astroml.ingestion.normalizer --help``.
+"""
+
 from __future__ import annotations
 
-from typing import Optional
+import argparse
+import json
+import sys
+from collections.abc import Sequence
+from datetime import datetime
+from typing import Any
 
 from astroml.db.schema import NormalizedTransaction
 from astroml.ingestion.parsers import (
@@ -32,7 +41,9 @@ def normalize_operation(data: dict) -> NormalizedTransaction:
     if asset_code == "XLM" and asset_issuer is None:
         normalized_asset = "XLM"
     else:
-        normalized_asset = f"{asset_code}:{asset_issuer}" if asset_code and asset_issuer else "UNKNOWN"
+        normalized_asset = (
+            f"{asset_code}:{asset_issuer}" if asset_code and asset_issuer else "UNKNOWN"
+        )
 
     timestamp = _parse_datetime(data["created_at"])
     transaction_hash = data["transaction_hash"]
@@ -74,3 +85,129 @@ def normalize_path_payment_hops(data: dict) -> list[NormalizedTransaction]:
         )
         for hop in hops
     ]
+
+
+_SNAPSHOT_FIELDS = ("transaction_hash", "sender", "receiver", "asset", "amount", "timestamp")
+
+
+def snapshot_transaction(tx: NormalizedTransaction) -> dict[str, Any]:
+    """Serialise a NormalizedTransaction into a JSON-safe snapshot dict (issue #978).
+
+    Args:
+        tx: The normalized transaction to snapshot.
+
+    Returns:
+        Dict with the normalized fields; ``timestamp`` is ISO-8601 and
+        ``amount`` is a float (or None).
+    """
+# ---------------------------------------------------------------------------
+# CLI — issue #990
+# ---------------------------------------------------------------------------
+
+_CLI_DESCRIPTION = (
+    "Normalize raw Horizon operation JSON into NormalizedTransaction records. "
+    "Input is a JSON object or array of operations; output is one JSON record per line."
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the ``python -m astroml.ingestion.normalizer`` argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="python -m astroml.ingestion.normalizer",
+        description=_CLI_DESCRIPTION,
+    )
+    parser.add_argument(
+        "input",
+        nargs="?",
+        default="-",
+        help="path to a JSON file of operations, or '-' for stdin (default: -)",
+    )
+    parser.add_argument(
+        "--hops",
+        action="store_true",
+        help="expand path payments into one record per hop",
+    )
+    return parser
+
+
+def _to_record(tx: NormalizedTransaction) -> dict[str, Any]:
+    return {
+        "transaction_hash": tx.transaction_hash,
+        "sender": tx.sender,
+        "receiver": tx.receiver,
+        "asset": tx.asset,
+        "amount": float(tx.amount) if tx.amount is not None else None,
+        "timestamp": tx.timestamp.isoformat(),
+    }
+
+
+def restore_transaction(snapshot: dict[str, Any]) -> NormalizedTransaction:
+    """Rebuild a NormalizedTransaction from :func:`snapshot_transaction` output (issue #978).
+
+    Args:
+        snapshot: Snapshot dict containing every normalized field.
+_RECORD_FIELDS = ("transaction_hash", "sender", "receiver", "asset", "amount", "timestamp")
+
+
+def restore_record(record: dict[str, Any]) -> NormalizedTransaction:
+    """Restore a NormalizedTransaction from a CLI output record (issue #985).
+
+    Inverse of the JSON records printed by :func:`main`, so a normalized
+    snapshot written to disk can be reloaded without re-fetching Horizon.
+
+    Args:
+        record: One decoded JSON record as emitted by the CLI.
+
+    Returns:
+        A new, unpersisted NormalizedTransaction.
+
+    Raises:
+        ValueError: if a required field is missing or the timestamp is invalid.
+    """
+    missing = [f for f in _SNAPSHOT_FIELDS if f not in snapshot]
+    if missing:
+        raise ValueError(f"snapshot missing fields: {missing}")
+    amount = snapshot["amount"]
+    return NormalizedTransaction(
+        transaction_hash=snapshot["transaction_hash"],
+        sender=snapshot["sender"],
+        receiver=snapshot["receiver"],
+        asset=snapshot["asset"],
+        amount=float(amount) if amount is not None else None,
+        timestamp=datetime.fromisoformat(snapshot["timestamp"]),
+    )
+        ValueError: if a field is missing or the timestamp is not ISO-8601.
+    """
+    missing = [f for f in _RECORD_FIELDS if f not in record]
+    if missing:
+        raise ValueError(f"record missing fields: {missing}")
+    amount = record["amount"]
+    return NormalizedTransaction(
+        transaction_hash=record["transaction_hash"],
+        sender=record["sender"],
+        receiver=record["receiver"],
+        asset=record["asset"],
+        amount=float(amount) if amount is not None else None,
+        timestamp=datetime.fromisoformat(record["timestamp"]),
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI entry point; returns a process exit code."""
+    args = build_parser().parse_args(argv)
+    if args.input == "-":
+        raw = sys.stdin.read()
+    else:
+        with open(args.input) as fh:
+            raw = fh.read()
+    data = json.loads(raw)
+    ops = data if isinstance(data, list) else [data]
+    normalize = normalize_path_payment_hops if args.hops else (lambda op: [normalize_operation(op)])
+    for op in ops:
+        for tx in normalize(op):
+            print(json.dumps(_to_record(tx)))
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

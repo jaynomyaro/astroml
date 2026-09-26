@@ -12,6 +12,7 @@ AstroML Documentation
    modules/models
    modules/training
    modules/validation
+   modules/agent
 
 Indices and tables
 ==================

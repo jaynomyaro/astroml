@@ -1,7 +1,7 @@
 """Tests for astroml.training.temporal_split."""
+
 import warnings
 from dataclasses import dataclass
-from typing import Any
 
 import pytest
 
@@ -13,10 +13,10 @@ from astroml.training.temporal_split import (
     validate_graph_split,
 )
 
-
 # ---------------------------------------------------------------------------
 # Minimal edge stub (mirrors astroml.features.graph.snapshot.Edge)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class FakeEdge:
@@ -33,6 +33,7 @@ def _make_edges(n: int = 10) -> list:
 # ---------------------------------------------------------------------------
 # temporal_graph_split — ratio mode
 # ---------------------------------------------------------------------------
+
 
 class TestTemporalGraphSplitRatio:
     def test_basic_split(self):
@@ -52,6 +53,7 @@ class TestTemporalGraphSplitRatio:
 
     def test_shuffled_input_still_splits_temporally(self):
         import random
+
         edges = _make_edges(20)
         random.seed(0)
         random.shuffle(edges)
@@ -74,10 +76,37 @@ class TestTemporalGraphSplitRatio:
         assert result.train_edges == []
         assert result.test_edges == []
 
+    def test_tied_timestamp_at_the_split_boundary_raises_leakage_error(self):
+        """Temporal split leakage guard (issue #837).
+
+        A plain index-based ratio split has no notion of "value", only
+        position: if two edges share the same timestamp and the split
+        index happens to fall between them, one goes to train and the
+        other to test despite being simultaneous. `temporal_graph_split`
+        runs its own `train_max >= test_min` check inline specifically to
+        catch this instead of silently returning a tied, leaking split.
+        """
+        edges = [
+            FakeEdge(src=f"a{i}", dst=f"b{i}", timestamp=t)
+            for i, t in enumerate([0, 1, 2, 3, 4, 4, 6, 7, 8, 9])
+        ]
+        with pytest.raises(LeakageError, match="overlap"):
+            temporal_graph_split(edges, train_ratio=0.5)
+
+    def test_distinct_timestamp_immediately_adjacent_to_the_boundary_is_clean(self):
+        """Complement to the tied-boundary case: when the split happens to
+        land exactly on a value change (no duplicate value spans train and
+        test), the guard must not false-positive."""
+        edges = _make_edges(10)  # timestamps 0..9, all distinct
+        result = temporal_graph_split(edges, train_ratio=0.5)
+        assert [e.timestamp for e in result.train_edges] == [0, 1, 2, 3, 4]
+        assert [e.timestamp for e in result.test_edges] == [5, 6, 7, 8, 9]
+
 
 # ---------------------------------------------------------------------------
 # temporal_graph_split — cutoff mode
 # ---------------------------------------------------------------------------
+
 
 class TestTemporalGraphSplitCutoff:
     def test_cutoff_partitioning(self):
@@ -114,6 +143,7 @@ class TestTemporalGraphSplitCutoff:
 # temporal_graph_split — edge validation
 # ---------------------------------------------------------------------------
 
+
 class TestTemporalGraphSplitValidation:
     def test_missing_time_attr_raises(self):
         @dataclass
@@ -144,6 +174,7 @@ class TestTemporalGraphSplitValidation:
 # validate_graph_split
 # ---------------------------------------------------------------------------
 
+
 class TestValidateGraphSplit:
     def test_clean_split_returns_true(self):
         edges = _make_edges(10)
@@ -154,8 +185,8 @@ class TestValidateGraphSplit:
         edges = _make_edges(10)
         # Manually construct an overlapping result.
         bad = GraphSplitResult(
-            train_edges=edges[:7],   # timestamps 0-6
-            test_edges=edges[5:],    # timestamps 5-9 — overlap at 5, 6
+            train_edges=edges[:7],  # timestamps 0-6
+            test_edges=edges[5:],  # timestamps 5-9 — overlap at 5, 6
             cutoff=5,
         )
         with pytest.raises(LeakageError, match="overlap"):
@@ -171,15 +202,18 @@ class TestValidateGraphSplit:
 # TemporalSplitter — DataFrame
 # ---------------------------------------------------------------------------
 
+
 class TestTemporalSplitterDataFrame:
     def test_dataframe_split(self):
-        import pandas as pd
         import numpy as np
+        import pandas as pd
 
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=10, freq="D"),
-            "value": np.arange(10, dtype=float),
-        })
+        df = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=10, freq="D"),
+                "value": np.arange(10, dtype=float),
+            }
+        )
         splitter = TemporalSplitter(train_ratio=0.8, time_col="timestamp")
         train, test = splitter.split_dataframe(df)
 
@@ -188,13 +222,15 @@ class TestTemporalSplitterDataFrame:
         assert train["timestamp"].max() < test["timestamp"].min()
 
     def test_dataframe_cutoff(self):
-        import pandas as pd
         import numpy as np
+        import pandas as pd
 
-        df = pd.DataFrame({
-            "ts": pd.date_range("2024-01-01", periods=10, freq="D"),
-            "v": np.arange(10),
-        })
+        df = pd.DataFrame(
+            {
+                "ts": pd.date_range("2024-01-01", periods=10, freq="D"),
+                "v": np.arange(10),
+            }
+        )
         cutoff = pd.Timestamp("2024-01-06")
         splitter = TemporalSplitter(cutoff=cutoff, time_col="ts")
         train, test = splitter.split_dataframe(df)
@@ -204,14 +240,17 @@ class TestTemporalSplitterDataFrame:
 
     def test_dataframe_overlap_raises(self):
         """TemporalSplitter validates and re-raises LeakageError."""
-        import pandas as pd
         import numpy as np
+        import pandas as pd
+
         from astroml.training.temporal_split import LeakageError, validate_temporal_split
 
-        df = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=10, freq="D"),
-            "v": np.arange(10),
-        })
+        df = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=10, freq="D"),
+                "v": np.arange(10),
+            }
+        )
         # Directly call validate_temporal_split with overlapping frames.
         train = df.iloc[:7].copy()
         test = df.iloc[5:].copy()
@@ -222,6 +261,7 @@ class TestTemporalSplitterDataFrame:
 # ---------------------------------------------------------------------------
 # TemporalSplitter — graph edges
 # ---------------------------------------------------------------------------
+
 
 class TestTemporalSplitterEdges:
     def test_edge_split_via_splitter(self):
@@ -240,6 +280,7 @@ class TestTemporalSplitterEdges:
     def test_no_leakage_guarantee(self):
         """Core property: no test edge timestamp precedes any train timestamp."""
         import random
+
         edges = _make_edges(100)
         random.seed(42)
         random.shuffle(edges)
@@ -251,3 +292,16 @@ class TestTemporalSplitterEdges:
         test_timestamps = {e.timestamp for e in result.test_edges}
         # The maximum training timestamp must be strictly less than every test timestamp.
         assert max(train_timestamps) < min(test_timestamps)
+
+    def test_splitter_also_rejects_a_tied_boundary_timestamp(self):
+        """The high-level `TemporalSplitter` entry point must not bypass
+        the leakage guard: a tie at the ratio-split boundary raises the
+        same `LeakageError` whether a caller uses `temporal_graph_split`
+        directly or goes through the splitter (issue #837)."""
+        edges = [
+            FakeEdge(src=f"a{i}", dst=f"b{i}", timestamp=t)
+            for i, t in enumerate([0, 1, 2, 3, 4, 4, 6, 7, 8, 9])
+        ]
+        splitter = TemporalSplitter(train_ratio=0.5)
+        with pytest.raises(LeakageError, match="overlap"):
+            splitter.split_edges(edges)

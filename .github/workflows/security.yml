@@ -11,6 +11,39 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # CodeQL static analysis
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python", "javascript"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{matrix.language}}"
+
+  # ---------------------------------------------------------------------------
   # Python security tests (pytest)
   # ---------------------------------------------------------------------------
   python-security:
@@ -24,6 +57,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: pip
 
       - name: Install dependencies
         run: |
@@ -50,21 +84,52 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: pip
 
       - name: Install pip-audit
         run: pip install pip-audit
 
-      - name: Audit requirements.txt
+      - name: Audit requirements.txt (human-readable report)
         run: |
+          # `--severity-filter` is not a pip-audit flag (checked against 2.10.1:
+          # it accepts -r/--requirement, --desc, --format, --output and
+          # --ignore-vuln). argparse therefore bound "critical,high" to the
+          # positional `project_path` and aborted with
+          # "argument project_path: not allowed with argument -r/--requirement"
+          # before auditing anything. pip-audit cannot express a severity
+          # threshold on the CLI at all, and its own JSON output has no
+          # severity field either (see scripts/check_pip_audit_sla.py's module
+          # docstring for the full investigation). This step is report-only,
+          # for a human skimming the log; the next step is what actually
+          # gates the build on a critical/high SLA.
           pip-audit -r requirements.txt --desc on --format columns
-        continue-on-error: false
+        continue-on-error: true
+
+      - name: Audit requirements.txt (critical/high SLA gate)
+        run: |
+          # `|| true`: we need the JSON on disk even when pip-audit's exit
+          # code is 1 (findings present); check_pip_audit_sla.py is what
+          # decides pass/fail from here, based on severity, not pip-audit's
+          # own all-or-nothing exit code.
+          pip-audit -r requirements.txt --format json --aliases on \
+            -o pip-audit-requirements.json || true
+          python scripts/check_pip_audit_sla.py pip-audit-requirements.json
+
+      - name: Upload pip-audit JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-requirements-json
+          path: pip-audit-requirements.json
+          retention-days: 30
 
       - name: Audit requirements-minimal.txt (if present)
         run: |
           if [ -f requirements-minimal.txt ]; then
-            pip-audit -r requirements-minimal.txt --desc on --format columns
+            pip-audit -r requirements-minimal.txt --format json --aliases on \
+              -o pip-audit-minimal.json || true
+            python scripts/check_pip_audit_sla.py pip-audit-minimal.json
           fi
-        continue-on-error: true
 
   # ---------------------------------------------------------------------------
   # Secret scanning — detect hard-coded credentials in source

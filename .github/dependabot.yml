@@ -1,0 +1,14 @@
+version: 2
+
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"

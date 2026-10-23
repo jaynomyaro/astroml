@@ -2,286 +2,319 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Optional
+import logging
 import numpy as np
 from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score, roc_auc_score,
-    average_precision_score, ndcg_score, mean_squared_error, mean_absolute_error
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    precision_score,
+    recall_score,
+    roc_auc_score,
 )
-import torch
+
+from astroml.utils.exceptions import AstroMLError
+
+logger = logging.getLogger(__name__)
 
 
 class ClassificationMetrics:
     """Metrics for node classification tasks."""
-    
+
     @staticmethod
-    def compute(y_true: np.ndarray, y_pred: np.ndarray, y_prob: Optional[np.ndarray] = None) -> Dict[str, float]:
+    def compute(
+        y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray | None = None
+    ) -> dict[str, float]:
         """Compute classification metrics."""
         metrics = {}
-        
+
         # Basic metrics
-        metrics['accuracy'] = accuracy_score(y_true, y_pred)
-        metrics['precision'] = precision_score(y_true, y_pred, average='weighted', zero_division=0)
-        metrics['recall'] = recall_score(y_true, y_pred, average='weighted', zero_division=0)
-        metrics['f1'] = f1_score(y_true, y_pred, average='weighted', zero_division=0)
-        
+        metrics["accuracy"] = accuracy_score(y_true, y_pred)
+        metrics["precision"] = precision_score(y_true, y_pred, average="weighted", zero_division=0)
+        metrics["recall"] = recall_score(y_true, y_pred, average="weighted", zero_division=0)
+        metrics["f1"] = f1_score(y_true, y_pred, average="weighted", zero_division=0)
+
         # AUC if probabilities are available
         if y_prob is not None and len(np.unique(y_true)) == 2:
             try:
-                metrics['auc'] = roc_auc_score(y_true, y_prob[:, 1])
-            except:
-                metrics['auc'] = 0.0
-        
+                metrics["auc"] = roc_auc_score(y_true, y_prob[:, 1])
+            except AstroMLError:
+                metrics["auc"] = 0.0
+
         # Per-class metrics
         unique_labels = np.unique(y_true)
         for label in unique_labels:
-            mask = (y_true == label)
+            mask = y_true == label
             if np.sum(mask) > 0:
                 label_precision = precision_score(
                     (y_true == label), (y_pred == label), zero_division=0
                 )
-                label_recall = recall_score(
-                    (y_true == label), (y_pred == label), zero_division=0
-                )
-                label_f1 = f1_score(
-                    (y_true == label), (y_pred == label), zero_division=0
-                )
-                
-                metrics[f'precision_class_{label}'] = label_precision
-                metrics[f'recall_class_{label}'] = label_recall
-                metrics[f'f1_class_{label}'] = label_f1
-        
+                label_recall = recall_score((y_true == label), (y_pred == label), zero_division=0)
+                label_f1 = f1_score((y_true == label), (y_pred == label), zero_division=0)
+
+                metrics[f"precision_class_{label}"] = label_precision
+                metrics[f"recall_class_{label}"] = label_recall
+                metrics[f"f1_class_{label}"] = label_f1
+
         return metrics
 
 
 class LinkPredictionMetrics:
     """Metrics for link prediction tasks."""
-    
+
     @staticmethod
     def compute(
-        y_true: np.ndarray, 
-        y_pred: np.ndarray, 
-        y_prob: Optional[np.ndarray] = None,
-        k_values: list[int] = [1, 5, 10, 20]
-    ) -> Dict[str, float]:
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        y_prob: np.ndarray | None = None,
+        k_values: list[int] = [1, 5, 10, 20],
+    ) -> dict[str, float]:
         """Compute link prediction metrics."""
         metrics = {}
-        
+
         # Basic classification metrics
-        metrics['accuracy'] = accuracy_score(y_true, y_pred)
-        metrics['precision'] = precision_score(y_true, y_pred, zero_division=0)
-        metrics['recall'] = recall_score(y_true, y_pred, zero_division=0)
-        metrics['f1'] = f1_score(y_true, y_pred, zero_division=0)
-        
+        metrics["accuracy"] = accuracy_score(y_true, y_pred)
+        metrics["precision"] = precision_score(y_true, y_pred, zero_division=0)
+        metrics["recall"] = recall_score(y_true, y_pred, zero_division=0)
+        metrics["f1"] = f1_score(y_true, y_pred, zero_division=0)
+
         # AUC if probabilities are available
         if y_prob is not None:
             try:
-                metrics['auc'] = roc_auc_score(y_true, y_prob)
-            except:
-                metrics['auc'] = 0.0
-        
+                metrics["auc"] = roc_auc_score(y_true, y_prob)
+            except AstroMLError:
+                metrics["auc"] = 0.0
+
         # Ranking metrics (for recommendation scenarios)
         if y_prob is not None:
             for k in k_values:
                 try:
                     # Hits@K
                     hits_k = LinkPredictionMetrics._hits_at_k(y_true, y_prob, k)
-                    metrics[f'hits_at_{k}'] = hits_k
-                    
+                    metrics[f"hits_at_{k}"] = hits_k
+
                     # Precision@K
                     precision_k = LinkPredictionMetrics._precision_at_k(y_true, y_prob, k)
-                    metrics[f'precision_at_{k}'] = precision_k
-                    
+                    metrics[f"precision_at_{k}"] = precision_k
+
                     # Recall@K
                     recall_k = LinkPredictionMetrics._recall_at_k(y_true, y_prob, k)
-                    metrics[f'recall_at_{k}'] = recall_k
-                    
-                except:
-                    metrics[f'hits_at_{k}'] = 0.0
-                    metrics[f'precision_at_{k}'] = 0.0
-                    metrics[f'recall_at_{k}'] = 0.0
-        
+                    metrics[f"recall_at_{k}"] = recall_k
+
+                except (ValueError, TypeError, IndexError, ZeroDivisionError, Exception) as exc:
+                    logger.warning("Failed computing ranking metrics at k=%d: %s", k, exc)
+                    metrics[f"hits_at_{k}"] = 0.0
+                    metrics[f"precision_at_{k}"] = 0.0
+                    metrics[f"recall_at_{k}"] = 0.0
+
         return metrics
-    
+
+    @staticmethod
+    def _top_k_indices(y_scores: np.ndarray, k: int) -> np.ndarray:
+        """Indices of the top-`k` scores, empty for `k <= 0` (issue #841).
+
+        ``np.argsort(y_scores)[-k:]`` is correct for any positive `k`, but
+        at `k == 0` Python/NumPy's negative-slice convention makes
+        ``[-0:]`` equivalent to ``[0:]`` — the *whole* array, not an empty
+        one. An empty top-0 prediction set should contribute nothing to
+        any of Hits@K/Precision@K/Recall@K; silently scoring against every
+        sample instead made all three wrong (and, for Hits@K and Recall@K,
+        wrong in the "looks plausible" direction of a non-zero score,
+        rather than an obvious crash).
+        """
+        if k <= 0:
+            return np.array([], dtype=int)
+        return np.argsort(y_scores)[-k:]
+
     @staticmethod
     def _hits_at_k(y_true: np.ndarray, y_scores: np.ndarray, k: int) -> float:
         """Compute Hits@K metric."""
+        if len(y_true) == 0:
+            return 0.0
+
         # Get top-k predictions
-        top_k_indices = np.argsort(y_scores)[-k:]
-        
+        top_k_indices = LinkPredictionMetrics._top_k_indices(y_scores, k)
+
         # Check if any true link is in top-k
         hits = 0
         for idx in top_k_indices:
             if y_true[idx] == 1:
                 hits += 1
                 break
-        
+
         return hits / len(y_true)
-    
+
     @staticmethod
     def _precision_at_k(y_true: np.ndarray, y_scores: np.ndarray, k: int) -> float:
-        """Compute Precision@K metric."""
-        top_k_indices = np.argsort(y_scores)[-k:]
+        """Compute Precision@K metric.
+
+        An empty prediction set (`k <= 0`) has no well-defined precision
+        (0 relevant retrieved out of 0 retrieved); returns 0.0 rather than
+        dividing by zero.
+        """
+        if k <= 0:
+            return 0.0
+
+        top_k_indices = LinkPredictionMetrics._top_k_indices(y_scores, k)
         top_k_true = y_true[top_k_indices]
-        
+
         return np.sum(top_k_true) / k
-    
+
     @staticmethod
     def _recall_at_k(y_true: np.ndarray, y_scores: np.ndarray, k: int) -> float:
         """Compute Recall@K metric."""
-        top_k_indices = np.argsort(y_scores)[-k:]
-        top_k_true = y_true[top_k_indices]
-        
         total_true = np.sum(y_true)
         if total_true == 0:
             return 0.0
-        
+
+        top_k_indices = LinkPredictionMetrics._top_k_indices(y_scores, k)
+        top_k_true = y_true[top_k_indices]
+
         return np.sum(top_k_true) / total_true
 
 
 class AnomalyDetectionMetrics:
     """Metrics for anomaly detection tasks."""
-    
+
     @staticmethod
     def compute(
-        y_true: np.ndarray, 
-        y_pred: np.ndarray, 
-        y_scores: Optional[np.ndarray] = None
-    ) -> Dict[str, float]:
+        y_true: np.ndarray, y_pred: np.ndarray, y_scores: np.ndarray | None = None
+    ) -> dict[str, float]:
         """Compute anomaly detection metrics."""
         metrics = {}
-        
+
         # Basic classification metrics
-        metrics['accuracy'] = accuracy_score(y_true, y_pred)
-        metrics['precision'] = precision_score(y_true, y_pred, zero_division=0)
-        metrics['recall'] = recall_score(y_true, y_pred, zero_division=0)
-        metrics['f1'] = f1_score(y_true, y_pred, zero_division=0)
-        
+        metrics["accuracy"] = accuracy_score(y_true, y_pred)
+        metrics["precision"] = precision_score(y_true, y_pred, zero_division=0)
+        metrics["recall"] = recall_score(y_true, y_pred, zero_division=0)
+        metrics["f1"] = f1_score(y_true, y_pred, zero_division=0)
+
         # AUC if scores are available
         if y_scores is not None:
             try:
-                metrics['auc'] = roc_auc_score(y_true, y_scores)
-            except:
-                metrics['auc'] = 0.0
-        
+                metrics["auc"] = roc_auc_score(y_true, y_scores)
+            except AstroMLError:
+                metrics["auc"] = 0.0
+
         # Anomaly-specific metrics
         tp = np.sum((y_true == 1) & (y_pred == 1))
         fp = np.sum((y_true == 0) & (y_pred == 1))
         fn = np.sum((y_true == 1) & (y_pred == 0))
         tn = np.sum((y_true == 0) & (y_pred == 0))
-        
+
         # False Positive Rate
         if fp + tn > 0:
-            metrics['false_positive_rate'] = fp / (fp + tn)
+            metrics["false_positive_rate"] = fp / (fp + tn)
         else:
-            metrics['false_positive_rate'] = 0.0
-        
+            metrics["false_positive_rate"] = 0.0
+
         # False Negative Rate
         if fn + tp > 0:
-            metrics['false_negative_rate'] = fn / (fn + tp)
+            metrics["false_negative_rate"] = fn / (fn + tp)
         else:
-            metrics['false_negative_rate'] = 0.0
-        
+            metrics["false_negative_rate"] = 0.0
+
         # Detection Rate (same as recall for anomalies)
         if tp + fn > 0:
-            metrics['detection_rate'] = tp / (tp + fn)
+            metrics["detection_rate"] = tp / (tp + fn)
         else:
-            metrics['detection_rate'] = 0.0
-        
+            metrics["detection_rate"] = 0.0
+
         return metrics
 
 
 class RegressionMetrics:
     """Metrics for regression tasks."""
-    
+
     @staticmethod
-    def compute(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    def compute(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
         """Compute regression metrics."""
         metrics = {}
-        
+
         # Basic regression metrics
-        metrics['mse'] = mean_squared_error(y_true, y_pred)
-        metrics['rmse'] = np.sqrt(metrics['mse'])
-        metrics['mae'] = mean_absolute_error(y_true, y_pred)
-        
+        metrics["mse"] = mean_squared_error(y_true, y_pred)
+        metrics["rmse"] = np.sqrt(metrics["mse"])
+        metrics["mae"] = mean_absolute_error(y_true, y_pred)
+
         # R-squared
         ss_res = np.sum((y_true - y_pred) ** 2)
         ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-        
+
         if ss_tot > 0:
-            metrics['r2'] = 1 - (ss_res / ss_tot)
+            metrics["r2"] = 1 - (ss_res / ss_tot)
         else:
-            metrics['r2'] = 0.0
-        
+            metrics["r2"] = 0.0
+
         # Mean Absolute Percentage Error
         if np.any(y_true != 0):
             mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
-            metrics['mape'] = mape
+            metrics["mape"] = mape
         else:
-            metrics['mape'] = float('inf')
-        
+            metrics["mape"] = float("inf")
+
         return metrics
 
 
 class MetricCalculator:
     """Main interface for computing metrics across different tasks."""
-    
+
     @staticmethod
     def compute_metrics(
         task_type: str,
         y_true: np.ndarray,
         y_pred: np.ndarray,
-        y_prob: Optional[np.ndarray] = None,
-        **kwargs
-    ) -> Dict[str, float]:
+        y_prob: np.ndarray | None = None,
+        **kwargs,
+    ) -> dict[str, float]:
         """Compute metrics based on task type."""
         task_type = task_type.lower()
-        
-        if task_type in ['classification', 'node_classification']:
+
+        if task_type in ["classification", "node_classification"]:
             return ClassificationMetrics.compute(y_true, y_pred, y_prob)
-        elif task_type in ['link_prediction', 'link_pred']:
+        elif task_type in ["link_prediction", "link_pred"]:
             return LinkPredictionMetrics.compute(y_true, y_pred, y_prob, **kwargs)
-        elif task_type in ['anomaly_detection', 'anomaly']:
+        elif task_type in ["anomaly_detection", "anomaly"]:
             return AnomalyDetectionMetrics.compute(y_true, y_pred, y_prob)
-        elif task_type in ['regression']:
+        elif task_type in ["regression"]:
             return RegressionMetrics.compute(y_true, y_pred)
         else:
             raise ValueError(f"Unknown task type: {task_type}")
-    
+
     @staticmethod
-    def aggregate_metrics(metrics_list: list[Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+    def aggregate_metrics(metrics_list: list[dict[str, float]]) -> dict[str, dict[str, float]]:
         """Aggregate metrics across multiple runs."""
         if not metrics_list:
             return {}
-        
+
         # Collect all metric names
         all_metrics = set()
         for metrics in metrics_list:
             all_metrics.update(metrics.keys())
-        
+
         # Compute statistics for each metric
         aggregated = {}
         for metric_name in all_metrics:
-            values = [m.get(metric_name, float('nan')) for m in metrics_list]
+            values = [m.get(metric_name, float("nan")) for m in metrics_list]
             valid_values = [v for v in values if not np.isnan(v)]
-            
+
             if valid_values:
                 aggregated[metric_name] = {
-                    'mean': np.mean(valid_values),
-                    'std': np.std(valid_values),
-                    'min': np.min(valid_values),
-                    'max': np.max(valid_values),
-                    'median': np.median(valid_values),
-                    'count': len(valid_values)
+                    "mean": np.mean(valid_values),
+                    "std": np.std(valid_values),
+                    "min": np.min(valid_values),
+                    "max": np.max(valid_values),
+                    "median": np.median(valid_values),
+                    "count": len(valid_values),
                 }
             else:
                 aggregated[metric_name] = {
-                    'mean': float('nan'),
-                    'std': float('nan'),
-                    'min': float('nan'),
-                    'max': float('nan'),
-                    'median': float('nan'),
-                    'count': 0
+                    "mean": float("nan"),
+                    "std": float("nan"),
+                    "min": float("nan"),
+                    "max": float("nan"),
+                    "median": float("nan"),
+                    "count": 0,
                 }
-        
+
         return aggregated

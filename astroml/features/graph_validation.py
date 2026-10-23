@@ -4,30 +4,34 @@ This module provides validation and sanity checks for graph structures,
 ensuring data quality before training ML models. It checks for isolated nodes,
 edge consistency, and provides summary statistics.
 """
-from typing import Dict, List, Optional, Set, Tuple, Union
+
+import logging
 import warnings
 
-import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class GraphValidationError(Exception):
     """Raised when graph validation fails critically."""
+
     pass
 
 
 class GraphValidationWarning(UserWarning):
     """Warning for non-critical graph validation issues."""
+
     pass
 
 
 def check_isolated_nodes(
     edges: pd.DataFrame,
-    all_nodes: Optional[Set[str]] = None,
+    all_nodes: set[str] | None = None,
     source_col: str = "source",
     target_col: str = "target",
     allow_isolated: bool = False,
-) -> Tuple[Set[str], Set[str]]:
+) -> tuple[set[str], set[str]]:
     """Check for isolated nodes in the graph.
 
     Args:
@@ -67,14 +71,9 @@ def check_isolated_nodes(
         isolated_nodes = set()
 
     if isolated_nodes and not allow_isolated:
-        raise GraphValidationError(
-            f"Found {len(isolated_nodes)} isolated nodes: {isolated_nodes}"
-        )
+        raise GraphValidationError(f"Found {len(isolated_nodes)} isolated nodes: {isolated_nodes}")
     elif isolated_nodes:
-        warnings.warn(
-            f"Found {len(isolated_nodes)} isolated nodes",
-            GraphValidationWarning
-        )
+        warnings.warn(f"Found {len(isolated_nodes)} isolated nodes", GraphValidationWarning)
 
     return connected_nodes, isolated_nodes
 
@@ -83,10 +82,10 @@ def check_edge_consistency(
     edges: pd.DataFrame,
     source_col: str = "source",
     target_col: str = "target",
-    weight_col: Optional[str] = None,
+    weight_col: str | None = None,
     allow_self_loops: bool = True,
     allow_duplicates: bool = False,
-) -> Dict[str, Union[int, List[Tuple]]]:
+) -> dict[str, int | list[tuple]]:
     """Validate edge consistency in the graph.
 
     Args:
@@ -125,28 +124,24 @@ def check_edge_consistency(
     # Check for null values
     null_sources = edges[source_col].isnull().sum()
     null_targets = edges[target_col].isnull().sum()
-    results['null_values'] = int(null_sources + null_targets)
+    results["null_values"] = int(null_sources + null_targets)
 
-    if results['null_values'] > 0:
-        raise GraphValidationError(
-            f"Found {results['null_values']} null values in edge columns"
-        )
+    if results["null_values"] > 0:
+        raise GraphValidationError(f"Found {results['null_values']} null values in edge columns")
 
     # Check for self-loops
     self_loop_mask = edges[source_col] == edges[target_col]
-    results['self_loops'] = int(self_loop_mask.sum())
+    results["self_loops"] = int(self_loop_mask.sum())
 
-    if results['self_loops'] > 0 and not allow_self_loops:
-        raise GraphValidationError(
-            f"Found {results['self_loops']} self-loop edges (not allowed)"
-        )
+    if results["self_loops"] > 0 and not allow_self_loops:
+        raise GraphValidationError(f"Found {results['self_loops']} self-loop edges (not allowed)")
 
     # Check for duplicate edges
     edge_pairs = edges[[source_col, target_col]]
     duplicates = edge_pairs.duplicated()
-    results['duplicate_edges'] = int(duplicates.sum())
+    results["duplicate_edges"] = int(duplicates.sum())
 
-    if results['duplicate_edges'] > 0 and not allow_duplicates:
+    if results["duplicate_edges"] > 0 and not allow_duplicates:
         raise GraphValidationError(
             f"Found {results['duplicate_edges']} duplicate edges (not allowed)"
         )
@@ -157,12 +152,12 @@ def check_edge_consistency(
             raise KeyError(f"Weight column '{weight_col}' not found in DataFrame")
 
         negative_weights = (edges[weight_col] < 0).sum()
-        results['negative_weights'] = int(negative_weights)
+        results["negative_weights"] = int(negative_weights)
 
-        if results['negative_weights'] > 0:
+        if results["negative_weights"] > 0:
             warnings.warn(
                 f"Found {results['negative_weights']} edges with negative weights",
-                GraphValidationWarning
+                GraphValidationWarning,
             )
 
     return results
@@ -172,8 +167,8 @@ def graph_summary_statistics(
     edges: pd.DataFrame,
     source_col: str = "source",
     target_col: str = "target",
-    weight_col: Optional[str] = None,
-) -> Dict[str, Union[int, float, Dict]]:
+    weight_col: str | None = None,
+) -> dict[str, int | float | dict]:
     """Generate summary statistics for the graph.
 
     Args:
@@ -208,19 +203,19 @@ def graph_summary_statistics(
     stats = {}
 
     # Basic counts
-    stats['num_edges'] = len(edges)
+    stats["num_edges"] = len(edges)
     source_nodes = set(edges[source_col].unique())
     target_nodes = set(edges[target_col].unique())
     all_nodes = source_nodes | target_nodes
 
-    stats['num_nodes'] = len(all_nodes)
-    stats['num_source_nodes'] = len(source_nodes)
-    stats['num_target_nodes'] = len(target_nodes)
+    stats["num_nodes"] = len(all_nodes)
+    stats["num_source_nodes"] = len(source_nodes)
+    stats["num_target_nodes"] = len(target_nodes)
 
     # Graph density
-    num_nodes = stats['num_nodes']
+    num_nodes = stats["num_nodes"]
     max_edges = num_nodes * (num_nodes - 1)  # directed graph
-    stats['density'] = stats['num_edges'] / max_edges if max_edges > 0 else 0.0
+    stats["density"] = stats["num_edges"] / max_edges if max_edges > 0 else 0.0
 
     # Degree statistics
     out_degrees = edges[source_col].value_counts()
@@ -230,12 +225,12 @@ def graph_summary_statistics(
     all_degrees = pd.Series(0, index=list(all_nodes))
     all_degrees = all_degrees.add(out_degrees, fill_value=0).add(in_degrees, fill_value=0)
 
-    stats['avg_degree'] = float(all_degrees.mean()) if not all_degrees.empty else 0.0
-    stats['degree_stats'] = {
-        'min': int(all_degrees.min()) if not all_degrees.empty else 0,
-        'max': int(all_degrees.max()) if not all_degrees.empty else 0,
-        'median': float(all_degrees.median()) if not all_degrees.empty else 0.0,
-        'std': float(all_degrees.std()) if not all_degrees.empty else 0.0,
+    stats["avg_degree"] = float(all_degrees.mean()) if not all_degrees.empty else 0.0
+    stats["degree_stats"] = {
+        "min": int(all_degrees.min()) if not all_degrees.empty else 0,
+        "max": int(all_degrees.max()) if not all_degrees.empty else 0,
+        "median": float(all_degrees.median()) if not all_degrees.empty else 0.0,
+        "std": float(all_degrees.std()) if not all_degrees.empty else 0.0,
     }
 
     # Weight statistics if provided
@@ -244,13 +239,13 @@ def graph_summary_statistics(
             raise KeyError(f"Weight column '{weight_col}' not found in DataFrame")
 
         weights = edges[weight_col]
-        stats['weight_stats'] = {
-            'min': float(weights.min()),
-            'max': float(weights.max()),
-            'mean': float(weights.mean()),
-            'median': float(weights.median()),
-            'std': float(weights.std()),
-            'sum': float(weights.sum()),
+        stats["weight_stats"] = {
+            "min": float(weights.min()),
+            "max": float(weights.max()),
+            "mean": float(weights.mean()),
+            "median": float(weights.median()),
+            "std": float(weights.std()),
+            "sum": float(weights.sum()),
         }
 
     return stats
@@ -258,15 +253,15 @@ def graph_summary_statistics(
 
 def validate_graph(
     edges: pd.DataFrame,
-    all_nodes: Optional[Set[str]] = None,
+    all_nodes: set[str] | None = None,
     source_col: str = "source",
     target_col: str = "target",
-    weight_col: Optional[str] = None,
+    weight_col: str | None = None,
     allow_isolated: bool = False,
     allow_self_loops: bool = True,
     allow_duplicates: bool = False,
     verbose: bool = True,
-) -> Dict[str, Union[Dict, Set]]:
+) -> dict[str, dict | set]:
     """Comprehensive graph validation with all checks.
 
     This is a convenience function that runs all validation checks and
@@ -281,7 +276,10 @@ def validate_graph(
         allow_isolated: If False, raises error for isolated nodes.
         allow_self_loops: If False, raises error for self-loops.
         allow_duplicates: If False, raises error for duplicate edges.
-        verbose: If True, prints validation summary.
+        verbose: If True, logs the validation summary via the module logger
+            (INFO for the full report, WARNING for isolated nodes, duplicate
+            edges, or an overall failed validation) instead of printing to
+            stdout.
 
     Returns:
         Dictionary containing:
@@ -308,56 +306,76 @@ def validate_graph(
     connected_nodes, isolated_nodes = check_isolated_nodes(
         edges, all_nodes, source_col, target_col, allow_isolated
     )
-    report['isolated_nodes'] = isolated_nodes
+    report["isolated_nodes"] = isolated_nodes
 
     edge_checks = check_edge_consistency(
-        edges, source_col, target_col, weight_col,
-        allow_self_loops, allow_duplicates
+        edges, source_col, target_col, weight_col, allow_self_loops, allow_duplicates
     )
-    report['edge_checks'] = edge_checks
+    report["edge_checks"] = edge_checks
 
     summary = graph_summary_statistics(edges, source_col, target_col, weight_col)
-    report['summary'] = summary
+    report["summary"] = summary
 
     # Determine if validation passed
     validation_passed = (
-        (len(isolated_nodes) == 0 or allow_isolated) and
-        (edge_checks['self_loops'] == 0 or allow_self_loops) and
-        (edge_checks['duplicate_edges'] == 0 or allow_duplicates) and
-        edge_checks['null_values'] == 0
+        (len(isolated_nodes) == 0 or allow_isolated)
+        and (edge_checks["self_loops"] == 0 or allow_self_loops)
+        and (edge_checks["duplicate_edges"] == 0 or allow_duplicates)
+        and edge_checks["null_values"] == 0
     )
-    report['validation_passed'] = validation_passed
+    report["validation_passed"] = validation_passed
 
     if verbose:
-        print("=" * 60)
-        print("GRAPH VALIDATION REPORT")
-        print("=" * 60)
-        print(f"\nNodes: {summary['num_nodes']}")
-        print(f"Edges: {summary['num_edges']}")
-        print(f"Density: {summary['density']:.6f}")
-        print(f"Average Degree: {summary['avg_degree']:.2f}")
-        print(f"\nDegree Statistics:")
-        print(f"  Min: {summary['degree_stats']['min']}")
-        print(f"  Max: {summary['degree_stats']['max']}")
-        print(f"  Median: {summary['degree_stats']['median']:.2f}")
-        print(f"  Std: {summary['degree_stats']['std']:.2f}")
+        separator = "=" * 60
+        degree_stats = summary["degree_stats"]
+        report_lines = [
+            separator,
+            "GRAPH VALIDATION REPORT",
+            separator,
+            f"\nNodes: {summary['num_nodes']}",
+            f"Edges: {summary['num_edges']}",
+            f"Density: {summary['density']:.6f}",
+            f"Average Degree: {summary['avg_degree']:.2f}",
+            "\nDegree Statistics:",
+            f"  Min: {degree_stats['min']}",
+            f"  Max: {degree_stats['max']}",
+            f"  Median: {degree_stats['median']:.2f}",
+            f"  Std: {degree_stats['std']:.2f}",
+        ]
 
-        if weight_col and 'weight_stats' in summary:
-            print(f"\nWeight Statistics:")
-            print(f"  Min: {summary['weight_stats']['min']:.2f}")
-            print(f"  Max: {summary['weight_stats']['max']:.2f}")
-            print(f"  Mean: {summary['weight_stats']['mean']:.2f}")
-            print(f"  Sum: {summary['weight_stats']['sum']:.2f}")
+        if weight_col and "weight_stats" in summary:
+            weight_stats = summary["weight_stats"]
+            report_lines += [
+                "\nWeight Statistics:",
+                f"  Min: {weight_stats['min']:.2f}",
+                f"  Max: {weight_stats['max']:.2f}",
+                f"  Mean: {weight_stats['mean']:.2f}",
+                f"  Sum: {weight_stats['sum']:.2f}",
+            ]
 
-        print(f"\nEdge Checks:")
-        print(f"  Self-loops: {edge_checks['self_loops']}")
-        print(f"  Duplicate edges: {edge_checks['duplicate_edges']}")
-        print(f"  Null values: {edge_checks['null_values']}")
+        report_lines += [
+            "\nEdge Checks:",
+            f"  Self-loops: {edge_checks['self_loops']}",
+            f"  Duplicate edges: {edge_checks['duplicate_edges']}",
+            f"  Null values: {edge_checks['null_values']}",
+        ]
 
         if isolated_nodes:
-            print(f"\nIsolated Nodes: {len(isolated_nodes)}")
+            report_lines.append(f"\nIsolated Nodes: {len(isolated_nodes)}")
 
-        print(f"\nValidation Status: {'PASSED' if validation_passed else 'FAILED'}")
-        print("=" * 60)
+        report_lines.append(f"\nValidation Status: {'PASSED' if validation_passed else 'FAILED'}")
+        report_lines.append(separator)
+
+        logger.info("\n".join(report_lines))
+
+        if isolated_nodes:
+            logger.warning("Graph validation found %d isolated node(s)", len(isolated_nodes))
+        if edge_checks["duplicate_edges"] > 0:
+            logger.warning(
+                "Graph validation found %d duplicate edge(s)",
+                edge_checks["duplicate_edges"],
+            )
+        if not validation_passed:
+            logger.warning("Graph validation FAILED: %s", edge_checks)
 
     return report

@@ -1,0 +1,38 @@
+name: pre-commit
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          # Issue #203: cache pip wheels so pre-commit hooks install faster
+          cache: pip
+
+      - name: Install pre-commit and detect-secrets
+        env:
+          PIP_CACHE_DIR: ~/.cache/pip
+        run: |
+          pip install pre-commit
+          pip install detect-secrets
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files
+
+      # `detect-secrets scan --baseline` rewrites the baseline and exits 0,
+      # so running it directly is not a gate. The checked-in gate compares a
+      # fresh scan against the audited baseline and fails on new/unaudited
+      # secrets; pre-commit also runs it, but keep an explicit step so a
+      # skipped local hook cannot silently disable enforcement.
+      - name: Run secrets gate
+        run: python -m astroml.ci.secrets_gate --baseline .secrets.baseline --root .
